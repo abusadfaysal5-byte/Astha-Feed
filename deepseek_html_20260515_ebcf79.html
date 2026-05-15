@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Astha Feed - Complete</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        /* ========== একটু মোবাইল-বান্ধব স্টাইল ========== */
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #f1f5f9;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        .card {
+            background: #fff;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            margin-bottom: 16px;
+            border: 1px solid #e2e8f0;
+        }
+        .btn {
+            padding: 10px 20px;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 44px;
+            transition: all 0.3s;
+        }
+        .btn-primary { background: #1a56db; color: #fff; }
+        .btn-secondary { background: #047857; color: #fff; }
+        .btn-accent { background: #f59e0b; color: #111; }
+        .btn-danger { background: #dc2626; color: #fff; }
+        .btn-outline { background: #fff; border: 2px solid #1a56db; color: #1a56db; }
+        input, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 14px;
+            background: #f8fafc;
+            min-height: 44px;
+        }
+        input:focus, select:focus {
+            border-color: #1a56db;
+            outline: none;
+        }
+        .sidebar {
+            background: #111827;
+            color: #fff;
+            min-height: 100vh;
+            width: 260px;
+            position: fixed;
+            left: 0;
+            top: 0;
+            z-index: 100;
+            overflow-y: auto;
+            padding-bottom: 80px;
+        }
+        .sidebar a {
+            color: #cbd5e1;
+            text-decoration: none;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-left: 3px solid transparent;
+            font-size: 14px;
+        }
+        .sidebar a:hover, .sidebar a.active {
+            background: #1e293b;
+            color: #fff;
+            border-left-color: #3b82f6;
+        }
+        .main-content {
+            margin-left: 260px;
+            padding: 24px;
+            min-height: 100vh;
+        }
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                min-height: auto;
+                position: relative;
+                display: none;
+            }
+            .sidebar.open { display: block; }
+            .main-content { margin-left: 0; padding: 12px; }
+        }
+        /* লগইন স্ক্রিন থেকে ডিফল্ট পাসওয়ার্ড লুকানো */
+        .login-card-custom p:last-of-type { display: none; }
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            padding: 14px 24px;
+            border-radius: 12px;
+            color: #fff;
+            font-weight: 600;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn { from { transform: translateX(120%); opacity:0; } to { transform: translateX(0); opacity:1; } }
+    </style>
+</head>
+<body>
+
+    <!-- ========== সাইডবার (মোবাইলে হ্যামবার্গার) ========== -->
+    <nav class="sidebar" id="sidebar">
+        <div style="padding:20px;text-align:center;border-bottom:1px solid #1e293b;">
+            <h3 style="color:#fff;">🏭 Astha Feed</h3>
+            <p style="font-size:10px;color:#94a3b8;">Complete System v2.0</p>
+        </div>
+        <a href="#" class="active" onclick="showPanel('dashboard')" id="nav-dashboard">
+            <i class="fas fa-tachometer-alt"></i> Dashboard
+        </a>
+        <a href="#" onclick="showPanel('dailyEntry')" id="nav-dailyEntry">
+            <i class="fas fa-edit"></i> Daily Entry
+        </a>
+        <a href="#" onclick="showPanel('weeklyForecast')" id="nav-weeklyForecast">
+            <i class="fas fa-calendar-week"></i> Weekly Forecast
+        </a>
+        <a href="#" onclick="showPanel('reports')" id="nav-reports">
+            <i class="fas fa-chart-bar"></i> Reports
+        </a>
+        <a href="#" onclick="showPanel('zoneManagement')" id="nav-zoneManagement" class="admin-only">
+            <i class="fas fa-map-marker-alt"></i> Zone Management
+        </a>
+        <a href="#" onclick="showPanel('userManagement')" id="nav-userManagement" class="admin-only">
+            <i class="fas fa-users-cog"></i> User Management
+        </a>
+        <a href="#" onclick="showPanel('settings')" id="nav-settings" class="admin-only">
+            <i class="fas fa-cog"></i> Google Sheets
+        </a>
+        <div style="padding:16px;border-top:1px solid #1e293b;margin-top:auto;">
+            <p style="font-size:11px;color:#94a3b8;">Logged in as: <strong id="loggedInUser">Admin</strong></p>
+            <p style="font-size:10px;color:#64748b;" id="userRoleDisplay">Role: Admin</p>
+            <button class="btn btn-danger btn-sm" style="width:100%;margin-top:8px;" onclick="logout()">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </button>
+        </div>
+    </nav>
+
+    <!-- মোবাইল হেডার -->
+    <div style="display:none;padding:12px;background:#111827;color:#fff;position:sticky;top:0;z-index:200;" id="mobileHeader">
+        <button onclick="toggleSidebar()" style="background:none;border:none;color:#fff;font-size:24px;">
+            <i class="fas fa-bars"></i>
+        </button>
+        <span style="margin-left:12px;font-weight:700;">Astha Feed</span>
+    </div>
+
+    <!-- ========== মেইন কন্টেন্ট ========== -->
+    <div class="main-content" id="mainContent">
+
+        <!-- ড্যাশবোর্ড প্যানেল -->
+        <div id="panel-dashboard" class="panel active">
+            <div id="dashboardExportArea">
+                <h2>📊 Sales & Collection Dashboard</h2>
+                <p style="color:#64748b;">Astha Feed Industries Ltd. | Uttara, Dhaka-1230</p>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:20px;">
+                    <div class="kpi-card"><span>Monthly Target</span><div class="kpi-value" id="kpiMonthlyTarget">0</div></div>
+                    <div class="kpi-card green"><span>Total Sales</span><div class="kpi-value" id="kpiTotalSales">0</div></div>
+                    <div class="kpi-card amber"><span>Achievement %</span><div class="kpi-value" id="kpiAchievement">0%</div></div>
+                    <div class="kpi-card red"><span>Collection</span><div class="kpi-value" id="kpiCollection">0</div></div>
+                </div>
+                <!-- চার্টের জায়গা -->
+                <div class="card" style="overflow-x:auto;">
+                    <h4>📋 Zone-wise Summary</h4>
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;" id="summaryTable">
+                        <thead><tr style="background:#f1f5f9;"><th>Zone</th><th>Target</th><th>Sales Fcst</th><th>Sales</th><th>Achv%</th><th>Coll Fcst</th><th>Collection</th></tr></thead>
+                        <tbody id="summaryTableBody"></tbody>
+                        <tfoot id="summaryTableFoot"></tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ডেইলি এন্ট্রি প্যানেল -->
+        <div id="panel-dailyEntry" class="panel" style="display:none;">
+            <h2>✏️ Daily Forecast Entry</h2>
+            <div class="card">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div><label>Zone</label><select id="entryZone"><option>--Select--</option></select></div>
+                    <div><label>Date</label><input type="date" id="entryDate"></div>
+                    <div><label>Sales Forecast (M.T)</label><input type="number" id="entrySalesForecast" step="any"></div>
+                    <div><label>Actual Sales (M.T)</label><input type="number" id="entrySales" step="any"></div>
+                    <div><label>Collection Forecast (BDT)</label><input type="number" id="entryCollectionForecast" step="any"></div>
+                    <div><label>Actual Collection (BDT)</label><input type="number" id="entryCollection" step="any"></div>
+                </div>
+                <button class="btn btn-primary" onclick="saveDailyEntry()"><i class="fas fa-save"></i> Save</button>
+                <button class="btn btn-outline" onclick="clearEntryForm()">Clear</button>
+                <p id="entryStatus"></p>
+            </div>
+            <div class="card">
+                <h4>📝 Recent Entries</h4>
+                <div style="overflow-x:auto;max-height:400px;">
+                    <table style="width:100%;font-size:12px;" id="recentEntriesTable">
+                        <thead><tr><th>Date</th><th>Zone</th><th>Sales Fcst</th><th>Sales</th><th>Coll Fcst</th><th>Collection</th></tr></thead>
+                        <tbody id="recentEntriesBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ইউজার ম্যানেজমেন্ট -->
+        <div id="panel-userManagement" class="panel admin-only-panel" style="display:none;">
+            <h2>👥 User Management</h2>
+            <div class="card">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                    <div><label>User ID</label><input type="text" id="newUserId" placeholder="e.g., zonal_mym"></div>
+                    <div><label>Password</label><input type="password" id="newUserPass" placeholder="Password"></div>
+                    <div><label>Zone</label><select id="newUserZone"><option>--Select--</option></select></div>
+                </div>
+                <button class="btn btn-primary" onclick="addUser()"><i class="fas fa-user-plus"></i> Add User</button>
+            </div>
+            <div class="card">
+                <h4>Registered Users</h4>
+                <table style="width:100%;font-size:13px;" id="usersTable">
+                    <thead><tr><th>User ID</th><th>Zone</th><th>Role</th><th>Status</th><th>Action</th></tr></thead>
+                    <tbody id="usersTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- গুগল শীট সেটিংস -->
+        <div id="panel-settings" class="panel admin-only-panel" style="display:none;">
+            <h2>⚙️ Google Sheets Settings</h2>
+            <div class="card">
+                <div><label>Sheet ID</label><input type="text" id="gsSheetId"></div>
+                <div><label>Apps Script URL</label><input type="text" id="gsApiKey"></div>
+                <button class="btn btn-primary" onclick="saveGSSettings()">Save & Sync All</button>
+                <p id="gsStatus"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- লগইন স্ক্রিন -->
+    <div id="loginOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.9);backdrop-filter:blur(8px);z-index:10000;display:flex;align-items:center;justify-content:center;">
+        <div class="login-card-custom" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:24px;padding:40px;text-align:center;color:#fff;width:90%;max-width:400px;">
+            <div style="font-size:48px;">🏭</div>
+            <h2>Astha Feed</h2>
+            <p style="color:#94a3b8;">Forecast System v2.0</p>
+            <div style="text-align:left;margin-top:20px;">
+                <label style="color:#cbd5e1;">User ID</label>
+                <input type="text" id="loginUserId" placeholder="Enter User ID" class="login-input" style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:12px;border-radius:10px;width:100%;">
+            </div>
+            <div style="text-align:left;margin-top:12px;">
+                <label style="color:#cbd5e1;">Password</label>
+                <input type="password" id="loginPassword" placeholder="Enter Password" class="login-input" style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:12px;border-radius:10px;width:100%;">
+            </div>
+            <button class="login-btn" onclick="doLogin()" style="background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:#fff;width:100%;padding:14px;border-radius:12px;border:none;margin-top:20px;font-weight:700;">
+                <i class="fas fa-sign-in-alt"></i> Login
+            </button>
+            <p id="loginError" style="color:#f87171;margin-top:10px;"></p>
+            <!-- ডিফল্ট পাসওয়ার্ড লাইন পুরোপুরি সরানো হয়েছে -->
+        </div>
+    </div>
+
+    <div id="toastContainer"></div>
+
+    <script>
+        // ==================== সিস্টেমের সম্পূর্ণ জাভাস্ক্রিপ্ট ====================
+        const DEFAULT_ZONES = [
+            { name:'Mymensingh', code:'MYM', monthlyTarget:0 },
+            { name:'Cumilla', code:'CUM', monthlyTarget:0 },
+            { name:'Khulna', code:'KHU', monthlyTarget:0 },
+            { name:'North Bengal', code:'NBG', monthlyTarget:0 },
+            { name:'Chittagong', code:'CTG', monthlyTarget:0 },
+            { name:'Barishal', code:'BAR', monthlyTarget:0 },
+            { name:'Sylhet', code:'SYL', monthlyTarget:0 },
+            { name:'Dhaka', code:'DHK', monthlyTarget:0 }
+        ];
+        const DEFAULT_USERS = [
+            { userId:'admin', password:'admin123', zone:'All', role:'admin', status:'active' },
+            { userId:'zonal_mym', password:'mym123', zone:'Mymensingh', role:'zonal', status:'active' },
+            { userId:'zonal_dhk', password:'dhk123', zone:'Dhaka', role:'zonal', status:'active' }
+        ];
+
+        let appState = {
+            zones: [...DEFAULT_ZONES],
+            users: [...DEFAULT_USERS],
+            dailyEntries: [],
+            currentUser: null,
+            gs: { sheetId:'', apiKey:'' }
+        };
+
+        function loadState() {
+            const saved = localStorage.getItem('asthaFull');
+            if (saved) {
+                const s = JSON.parse(saved);
+                appState.zones = s.zones || [...DEFAULT_ZONES];
+                appState.users = s.users || [...DEFAULT_USERS];
+                appState.dailyEntries = s.dailyEntries || [];
+                appState.gs = s.gs || { sheetId:'', apiKey:'' };
+                appState.currentUser = s.currentUser || null;
+            }
+        }
+        function saveState() {
+            localStorage.setItem('asthaFull', JSON.stringify(appState));
+        }
+
+        // ==================== লগইন ====================
+        function doLogin() {
+            const uid = document.getElementById('loginUserId').value.trim();
+            const pwd = document.getElementById('loginPassword').value.trim();
+            const user = appState.users.find(u => u.userId === uid && u.password === pwd);
+            if (user && user.status === 'active') {
+                appState.currentUser = user;
+                saveState();
+                document.getElementById('loginOverlay').style.display = 'none';
+                initApp();
+                showToast(`Welcome, ${user.userId}!`);
+            } else {
+                document.getElementById('loginError').textContent = 'Invalid credentials or account inactive.';
+            }
+        }
+        function logout() {
+            appState.currentUser = null;
+            saveState();
+            location.reload();
+        }
+
+        // ==================== অ্যাপ ইনিশিয়ালাইজ ====================
+        function initApp() {
+            const isAdmin = appState.currentUser?.role === 'admin';
+            document.getElementById('loggedInUser').textContent = appState.currentUser.userId;
+            document.getElementById('userRoleDisplay').textContent = 'Role: ' + appState.currentUser.role;
+            document.querySelectorAll('.admin-only, .admin-only-panel').forEach(el => el.style.display = isAdmin ? '' : 'none');
+            document.getElementById('entryDate').value = new Date().toISOString().split('T')[0];
+            populateZoneDropdowns();
+            populateEntryZoneDropdown();
+            populateNewUserZoneDropdown();
+            refreshUserTable();
+            loadGSSettingsToForm();
+            showPanel('dashboard');
+        }
+
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+        }
+
+        function showPanel(name) {
+            document.querySelectorAll('.panel').forEach(p => p.style.display = 'none');
+            document.getElementById('panel-' + name).style.display = 'block';
+            document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
+            document.getElementById('nav-' + name).classList.add('active');
+            if (window.innerWidth <= 768) {
+                document.getElementById('sidebar').classList.remove('open');
+            }
+            if (name === 'dashboard') refreshDashboard();
+            if (name === 'dailyEntry') refreshRecentEntries();
+            if (name === 'userManagement') refreshUserTable();
+        }
+
+        // ==================== জোন ও ইউজার ম্যানেজমেন্ট ====================
+        function populateZoneDropdowns() {
+            const selects = ['entryZone', 'newUserZone'];
+            selects.forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.innerHTML = '<option value="">--Select Zone--</option>' +
+                    appState.zones.map(z => `<option value="${z.name}">${z.name} (${z.code})</option>`).join('');
+            });
+        }
+
+        function populateEntryZoneDropdown() {
+            const el = document.getElementById('entryZone');
+            if (!el) return;
+            const userZone = appState.currentUser?.zone;
+            if (appState.currentUser?.role === 'admin' || userZone === 'All') {
+                el.innerHTML = '<option value="">--Select Zone--</option>' +
+                    appState.zones.map(z => `<option value="${z.name}">${z.name}</option>`).join('');
+            } else {
+                el.innerHTML = `<option value="${userZone}">${userZone}</option>`;
+                el.disabled = true;
+            }
+        }
+
+        function populateNewUserZoneDropdown() {
+            const el = document.getElementById('newUserZone');
+            if (!el) return;
+            el.innerHTML = '<option value="">--Select Zone--</option>' +
+                appState.zones.map(z => `<option value="${z.name}">${z.name}</option>`).join('') +
+                '<option value="All">All (Admin)</option>';
+        }
+
+        function addUser() {
+            const uid = document.getElementById('newUserId').value.trim();
+            const pwd = document.getElementById('newUserPass').value.trim();
+            const zone = document.getElementById('newUserZone').value;
+            if (!uid || !pwd || !zone) { showToast('Fill all fields', 'warning'); return; }
+            if (appState.users.find(u => u.userId === uid)) { showToast('User ID exists!', 'warning'); return; }
+            const role = zone === 'All' ? 'admin' : 'zonal';
+            appState.users.push({ userId: uid, password: pwd, zone, role, status: 'active' });
+            saveState();
+            document.getElementById('newUserId').value = '';
+            document.getElementById('newUserPass').value = '';
+            refreshUserTable();
+            showToast('User created!', 'success');
+        }
+
+        function refreshUserTable() {
+            const tbody = document.getElementById('usersTableBody');
+            if (!tbody) return;
+            tbody.innerHTML = appState.users.map((u, i) => `
+                <tr>
+                    <td>${u.userId}</td><td>${u.zone}</td>
+                    <td><span class="badge ${u.role==='admin'?'badge-danger':'badge-info'}">${u.role}</span></td>
+                    <td><span class="badge ${u.status==='active'?'badge-success':'badge-warning'}">${u.status}</span></td>
+                    <td>
+                        <button class="btn btn-sm ${u.status==='active'?'btn-warning':'btn-success'}" onclick="toggleUserStatus(${i})">${u.status==='active'?'Deact':'Act'}</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteUser(${i})"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function toggleUserStatus(index) {
+            appState.users[index].status = appState.users[index].status === 'active' ? 'inactive' : 'active';
+            saveState();
+            refreshUserTable();
+        }
+
+        function deleteUser(index) {
+            if (appState.users[index].userId === 'admin') { showToast('Cannot delete admin', 'warning'); return; }
+            appState.users.splice(index, 1);
+            saveState();
+            refreshUserTable();
+        }
+
+        // ==================== ডেইলি এন্ট্রি ====================
+        function saveDailyEntry() {
+            const zone = document.getElementById('entryZone').value;
+            const date = document.getElementById('entryDate').value;
+            const sf = parseFloat(document.getElementById('entrySalesForecast').value) || 0;
+            const s = parseFloat(document.getElementById('entrySales').value) || 0;
+            const cf = parseFloat(document.getElementById('entryCollectionForecast').value) || 0;
+            const c = parseFloat(document.getElementById('entryCollection').value) || 0;
+            if (!zone || !date) { showToast('Select zone and date', 'warning'); return; }
+            const entry = {
+                id: Date.now(),
+                zone, date,
+                salesForecast: sf, sales: s,
+                collectionForecast: cf, collection: c,
+                userId: appState.currentUser.userId,
+                timestamp: new Date().toISOString()
+            };
+            const idx = appState.dailyEntries.findIndex(e => e.zone === zone && e.date === date);
+            if (idx >= 0) appState.dailyEntries[idx] = entry;
+            else appState.dailyEntries.push(entry);
+            saveState();
+            clearEntryForm();
+            refreshRecentEntries();
+            refreshDashboard();
+            showToast('Entry saved!', 'success');
+            if (appState.gs.sheetId && appState.gs.apiKey) syncAllToSheet();
+        }
+
+        function clearEntryForm() {
+            ['entrySalesForecast','entrySales','entryCollectionForecast','entryCollection'].forEach(id => document.getElementById(id).value='');
+        }
+
+        function refreshRecentEntries() {
+            const tbody = document.getElementById('recentEntriesBody');
+            if (!tbody) return;
+            const userZone = appState.currentUser?.zone;
+            let list = appState.dailyEntries;
+            if (appState.currentUser?.role !== 'admin' && userZone !== 'All') {
+                list = list.filter(e => e.zone === userZone);
+            }
+            list.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 50);
+            tbody.innerHTML = list.map(e => `
+                <tr>
+                    <td>${e.date}</td><td>${e.zone}</td>
+                    <td>${e.salesForecast.toFixed(2)}</td><td>${e.sales.toFixed(2)}</td>
+                    <td>${e.collectionForecast.toFixed(0)}</td><td>${e.collection.toFixed(0)}</td>
+                </tr>
+            `).join('') || '<tr><td colspan="6">No entries yet</td></tr>';
+        }
+
+        // ==================== ড্যাশবোর্ড ====================
+        function refreshDashboard() {
+            const zoneData = {};
+            appState.zones.forEach(z => { zoneData[z.name] = { target: z.monthlyTarget || 0, sales: 0, coll: 0, salesFcst: 0, collFcst: 0 }; });
+            appState.dailyEntries.forEach(e => {
+                if (zoneData[e.zone]) {
+                    zoneData[e.zone].sales += e.sales;
+                    zoneData[e.zone].coll += e.collection;
+                    zoneData[e.zone].salesFcst += e.salesForecast;
+                    zoneData[e.zone].collFcst += e.collectionForecast;
+                }
+            });
+            let totalTarget=0, totalSales=0, totalColl=0, totalSalesFcst=0;
+            const tbody = document.getElementById('summaryTableBody');
+            const tfoot = document.getElementById('summaryTableFoot');
+            tbody.innerHTML = appState.zones.map(z => {
+                const d = zoneData[z.name];
+                totalTarget += d.target; totalSales += d.sales; totalColl += d.coll; totalSalesFcst += d.salesFcst;
+                const achv = d.salesFcst > 0 ? (d.sales/d.salesFcst*100).toFixed(1) : '0.0';
+                return `<tr><td>${z.name}</td><td>${d.target}</td><td>${d.salesFcst.toFixed(2)}</td><td>${d.sales.toFixed(2)}</td><td>${achv}%</td><td>${d.collFcst.toFixed(0)}</td><td>${d.coll.toFixed(0)}</td></tr>`;
+            }).join('');
+            tfoot.innerHTML = `<tr><td><b>Total</b></td><td><b>${totalTarget}</b></td><td><b>${totalSalesFcst.toFixed(2)}</b></td><td><b>${totalSales.toFixed(2)}</b></td><td></td><td></td><td><b>${totalColl.toFixed(0)}</b></td></tr>`;
+            document.getElementById('kpiMonthlyTarget').textContent = totalTarget + ' MT';
+            document.getElementById('kpiTotalSales').textContent = totalSales.toFixed(2) + ' MT';
+            document.getElementById('kpiAchievement').textContent = totalSalesFcst > 0 ? (totalSales/totalSalesFcst*100).toFixed(1) + '%' : '0%';
+            document.getElementById('kpiCollection').textContent = 'BDT ' + totalColl.toFixed(0);
+        }
+
+        // ==================== গুগল শীট সিঙ্ক ====================
+        async function syncAllToSheet() {
+            const payload = {
+                action: 'syncAll',
+                sheetId: appState.gs.sheetId,
+                dailyData: [['Date','Zone','SalesForecast','Sales','CollectionForecast','Collection','UserId','Timestamp']]
+                    .concat(appState.dailyEntries.map(e => [e.date,e.zone,e.salesForecast,e.sales,e.collectionForecast,e.collection,e.userId,e.timestamp]))
+            };
+            try {
+                const resp = await fetch(appState.gs.apiKey, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'text/plain'},
+                    body: JSON.stringify(payload)
+                });
+                if (resp.ok) showToast('✅ Synced to Google Sheets', 'success');
+                else throw new Error('HTTP ' + resp.status);
+            } catch (e) {
+                showToast('⚠️ Sync failed: ' + e.message, 'danger');
+            }
+        }
+
+        function loadGSSettingsToForm() {
+            if (appState.gs.sheetId) document.getElementById('gsSheetId').value = appState.gs.sheetId;
+            if (appState.gs.apiKey) document.getElementById('gsApiKey').value = appState.gs.apiKey;
+        }
+
+        function saveGSSettings() {
+            appState.gs.sheetId = document.getElementById('gsSheetId').value.trim();
+            appState.gs.apiKey = document.getElementById('gsApiKey').value.trim();
+            saveState();
+            showToast('Settings saved. Now syncing...');
+            if (appState.gs.sheetId && appState.gs.apiKey) syncAllToSheet();
+        }
+
+        // ==================== ইউটিলিটি ====================
+        function showToast(msg, type='info') {
+            const colors = { success:'#059669', danger:'#dc2626', warning:'#d97706', info:'#1a56db' };
+            const el = document.createElement('div');
+            el.className = 'toast';
+            el.style.background = colors[type] || colors.info;
+            el.textContent = msg;
+            document.getElementById('toastContainer').appendChild(el);
+            setTimeout(() => { el.style.opacity='0'; el.style.transform='translateX(120%)'; setTimeout(()=>el.remove(),400); }, 2500);
+        }
+
+        // ==================== স্টার্টআপ ====================
+        loadState();
+        if (appState.currentUser) {
+            document.getElementById('loginOverlay').style.display = 'none';
+            initApp();
+        }
+    </script>
+</body>
+</html>
