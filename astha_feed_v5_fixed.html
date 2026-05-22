@@ -1,0 +1,2762 @@
+<!--
+  ============================================================
+  ASTHA FEED INDUSTRIES – Sales & Collection Forecast System
+  v1.0 — Full Fix + Dynamic + Mobile/PC Responsive
+  ============================================================
+
+  REQUIRED GOOGLE APPS SCRIPT (doGet + doPost):
+  Paste this into your GAS editor and re-deploy as a new version:
+
+  ---------------------------------------------------------------
+  function doGet(e) {
+    const action = e.parameter.action;
+    const sheetId = e.parameter.sheetId;
+    if (!sheetId) return ContentService.createTextOutput(JSON.stringify({status:'error',message:'No sheetId'})).setMimeType(ContentService.MimeType.JSON);
+    try {
+      const ss = SpreadsheetApp.openById(sheetId);
+      const result = { status: 'success' };
+      const readSheet = (name, mapper) => {
+        const sh = ss.getSheetByName(name);
+        if (!sh || sh.getLastRow() < 2) return [];
+        return sh.getRange(2, 1, sh.getLastRow()-1, sh.getLastColumn()).getValues().map(mapper);
+      };
+      result.dailyEntries = readSheet('DailyEntries', r => ({
+        id: r[9]||String(Date.now()+Math.random()), date:r[0]?Utilities.formatDate(new Date(r[0]),'GMT+6','yyyy-MM-dd'):'',
+        zone:r[1]||'', monthlyTarget:parseFloat(r[2])||0, salesForecast:parseFloat(r[3])||0,
+        sales:parseFloat(r[4])||0, collectionForecast:parseFloat(r[5])||0,
+        collection:parseFloat(r[6])||0, remarks:r[7]||'', userId:r[8]||'', timestamp:r[9]||''
+      }));
+      result.zones = readSheet('Zones', r => ({name:r[0]||'',code:r[1]||'',monthlyTarget:parseFloat(r[2])||0}));
+      result.users = readSheet('Users', r => ({userId:r[0]||'',password:r[1]||'',zone:r[2]||'',role:r[3]||'zonal',status:r[4]||'active'}));
+      result.weeklyForecasts = readSheet('WeeklyForecast', r => ({zone:r[0]||'',dateRange:r[1]||'',salesForecast:parseFloat(r[2])||0,collectionForecast:parseFloat(r[3])||0,id:Date.now()}));
+      return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+    } catch(err) {
+      return ContentService.createTextOutput(JSON.stringify({status:'error',message:err.toString()})).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
+  function doPost(e) {
+    try {
+      const payload = JSON.parse(e.postData.contents);
+      const ss = SpreadsheetApp.openById(payload.sheetId);
+      const writeSheet = (name, data) => {
+        let sh = ss.getSheetByName(name);
+        if (!sh) sh = ss.insertSheet(name);
+        sh.clearContents();
+        if (data && data.length > 0) sh.getRange(1, 1, data.length, data[0].length).setValues(data);
+      };
+      if (payload.action === 'syncAll') {
+        if (payload.dailyData)  writeSheet(payload.dailySheet||'DailyEntries', payload.dailyData);
+        if (payload.weeklyData) writeSheet(payload.weeklySheet||'WeeklyForecast', payload.weeklyData);
+        if (payload.zonesData)  writeSheet(payload.zonesSheet||'Zones', payload.zonesData);
+        if (payload.usersData)  writeSheet(payload.usersSheet||'Users', payload.usersData);
+      }
+      return ContentService.createTextOutput(JSON.stringify({status:'success'})).setMimeType(ContentService.MimeType.JSON);
+    } catch(err) {
+      return ContentService.createTextOutput(JSON.stringify({status:'error',message:err.toString()})).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+  ---------------------------------------------------------------
+  After pasting: Deploy >New deployment >Web App
+  Execute as: Me | Who has access: Anyone
+  Copy the new URL into the app Settings.
+  ============================================================
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Astha Feed">
+<title>Astha Feed Industries – Forecast v1.0</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+/* ===== CSS VARIABLES ===== */
+:root {
+  --primary: #1a56db;
+  --primary-dark: #1e40af;
+  --secondary: #047857;
+  --accent: #f59e0b;
+  --danger: #dc2626;
+  --bg: #f1f5f9;
+  --card: #ffffff;
+  --text: #1e293b;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --sidebar-w: 260px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --font-xs: .65rem;
+  --font-sm: .75rem;
+  --font-base: .875rem;
+  --radius: 12px;
+  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,.1);
+}
+
+/* ===== RESET & BASE ===== */
+*, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0; padding: 0;
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  padding-bottom: var(--safe-bottom);
+  font-size: var(--font-base);
+}
+
+/* ===== CARD ===== */
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  transition: box-shadow .2s ease;
+}
+
+/* ===== BUTTONS ===== */
+.btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: var(--font-sm);
+  font-family: inherit;
+  transition: all .2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+  min-height: 36px;
+  position: relative;
+  overflow: hidden;
+}
+.btn:active { transform: scale(.95); }
+.btn-primary  { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-secondary{ background: var(--secondary); color: #fff; }
+.btn-accent   { background: var(--accent); color: #111; }
+.btn-danger   { background: var(--danger); color: #fff; }
+.btn-outline  { background: #fff; border: 2px solid var(--primary); color: var(--primary); }
+.btn-info     { background: #0891b2; color: #fff; }
+.btn-ghost    { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+.btn-sm  { padding: 5px 10px; font-size: var(--font-xs); border-radius: 6px; min-height: 30px; }
+.btn-lg  { padding: 11px 22px; font-size: var(--font-base); border-radius: 10px; font-weight: 700; min-height: 44px; }
+
+/* Share buttons */
+@keyframes btnPulse { 0%,100%{box-shadow:0 4px 14px rgba(0,0,0,.12)} 50%{box-shadow:0 8px 24px rgba(0,0,0,.25)} }
+.btn-share { animation: btnPulse 2.5s ease-in-out infinite; }
+.btn-share-pdf     { background: #dc2626; color: #fff; }
+.btn-share-jpeg    { background: #f59e0b; color: #111; }
+.btn-share-text    { background: #64748b; color: #fff; }
+.btn-share-csv     { background: #059669; color: #fff; }
+.btn-share-print   { background: #4f46e5; color: #fff; }
+.btn-share-whatsapp{ background: #25D366; color: #fff; }
+.btn-share-email   { background: #1a56db; color: #fff; }
+.share-btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
+.share-btn-group .btn-share:nth-child(1){animation-delay:0s}
+.share-btn-group .btn-share:nth-child(2){animation-delay:.2s}
+.share-btn-group .btn-share:nth-child(3){animation-delay:.4s}
+.share-btn-group .btn-share:nth-child(4){animation-delay:.6s}
+.share-btn-group .btn-share:nth-child(5){animation-delay:.8s}
+.share-btn-group .btn-share:nth-child(6){animation-delay:1s}
+.share-btn-group .btn-share:nth-child(7){animation-delay:1.2s}
+
+/* ===== FORM ELEMENTS ===== */
+input, select, textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  font-size: var(--font-sm);
+  font-family: inherit;
+  transition: all .2s ease;
+  background: #f8fafc;
+  color: var(--text);
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 38px;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(26,86,219,.1);
+  background: #fff;
+}
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M6 8L1 3h10z' fill='%23475569'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+label {
+  font-weight: 600;
+  font-size: var(--font-xs);
+  color: #475569;
+  margin-bottom: 3px;
+  display: block;
+  letter-spacing: .3px;
+}
+
+/* ===== BADGES ===== */
+.badge { padding: 3px 8px; border-radius: 16px; font-size: .6rem; font-weight: 700; display: inline-block; white-space: nowrap; }
+.badge-success { background: #d1fae5; color: #065f46; }
+.badge-warning { background: #fef3c7; color: #92400e; }
+.badge-danger  { background: #fee2e2; color: #991b1b; }
+.badge-info    { background: #dbeafe; color: #1e40af; }
+
+/* ===== MODAL ===== */
+.modal-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,.5); z-index: 999; display: flex; align-items: center; justify-content: center; animation: fadeIn .2s ease; padding: 16px; }
+.modal { background: #fff; border-radius: 16px; padding: 20px; max-width: 600px; width: 100%; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.3); animation: slideUp .3s ease; }
+
+/* ===== TABS ===== */
+.tab-btn { padding: 8px 14px; border: none; background: transparent; cursor: pointer; font-weight: 600; font-size: var(--font-sm); font-family: inherit; color: #64748b; border-bottom: 3px solid transparent; transition: all .2s ease; white-space: nowrap; }
+.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+/* ===== SIDEBAR ===== */
+.sidebar {
+  background: #0f172a;
+  color: #fff;
+  height: 100vh;
+  width: var(--sidebar-w);
+  position: fixed;
+  left: 0; top: 0;
+  z-index: 100;
+  transition: transform .3s cubic-bezier(.4,0,.2,1);
+  overflow: hidden; /* FIX: outer sidebar does NOT scroll */
+  display: flex;
+  flex-direction: column;
+}
+/* FIX: only the nav area scrolls, footer stays pinned at bottom */
+.sidebar-nav-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 8px;
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,.12) transparent;
+}
+.sidebar-nav-scroll::-webkit-scrollbar { width: 4px; }
+.sidebar-nav-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 4px; }
+.sidebar-logo {
+  padding: 18px 16px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sidebar-logo-icon {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, #1a56db, #7c3aed);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.sidebar a {
+  color: #94a3b8;
+  text-decoration: none;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all .2s ease;
+  border-left: 3px solid transparent;
+  font-size: var(--font-sm);
+  min-height: 42px;
+  font-weight: 500;
+}
+.sidebar a:hover, .sidebar a.active {
+  background: rgba(255,255,255,.06);
+  color: #fff;
+  border-left-color: #3b82f6;
+}
+.sidebar a i { width: 16px; text-align: center; font-size: 13px; }
+.sidebar-section-label {
+  padding: 10px 16px 4px;
+  font-size: .55rem;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.sidebar-footer {
+  margin-top: auto;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+
+/* ===== MAIN CONTENT ===== */
+.main-content {
+  margin-left: var(--sidebar-w);
+  padding: 16px;
+  min-height: 100vh;
+  transition: margin-left .3s ease;
+  padding-bottom: calc(20px + var(--safe-bottom));
+}
+
+/* ===== TOAST ===== */
+.toast {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 9999;
+  padding: 10px 16px;
+  border-radius: 10px;
+  color: #fff;
+  font-weight: 600;
+  font-size: var(--font-xs);
+  animation: slideInRight .35s ease;
+  box-shadow: 0 8px 24px rgba(0,0,0,.2);
+  max-width: 320px;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+@keyframes slideInRight { from{transform:translateX(120%);opacity:0} to{transform:translateX(0);opacity:1} }
+
+/* ===== CHARTS ===== */
+.chart-container { position: relative; width: 100%; max-height: 280px; }
+
+/* ===== KPI CARDS ===== */
+.kpi-card { border-radius: var(--radius); padding: 14px; text-align: center; transition: transform .2s ease; }
+.kpi-card:active { transform: scale(.96); }
+.kpi-card.blue   { background: linear-gradient(135deg, #1a56db, #1e40af); color: #fff; }
+.kpi-card.green  { background: linear-gradient(135deg, #059669, #047857); color: #fff; }
+.kpi-card.amber  { background: linear-gradient(135deg, #d97706, #b45309); color: #fff; }
+.kpi-card.red    { background: linear-gradient(135deg, #dc2626, #b91c1c); color: #fff; }
+.kpi-card.purple { background: linear-gradient(135deg, #7c3aed, #5b21b6); color: #fff; }
+.kpi-card.teal   { background: linear-gradient(135deg, #0891b2, #0e7490); color: #fff; }
+.kpi-value { font-size: 1.5rem; font-weight: 800; letter-spacing: -1px; font-family: 'Outfit', sans-serif; }
+.kpi-label { font-size: .58rem; opacity: .85; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.kpi-sub   { font-size: .6rem; opacity: .7; margin-top: 2px; }
+
+/* ===== LOGIN ===== */
+/* FIX: Login overlay is the full-screen backdrop itself */
+#loginOverlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(15,23,42,.9);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 10000;
+  display: none; /* hidden by default, shown via JS */
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.login-card {
+  background: rgba(255,255,255,.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 20px;
+  padding: 32px 24px;
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+  box-shadow: 0 30px 60px rgba(0,0,0,.5);
+  animation: floatIn .6s ease-out;
+}
+@keyframes floatIn { 0%{opacity:0;transform:translateY(30px) scale(.97)} 100%{opacity:1;transform:translateY(0) scale(1)} }
+.login-input {
+  background: rgba(255,255,255,.1);
+  border: 1.5px solid rgba(255,255,255,.2);
+  color: #fff;
+  padding: 11px 14px;
+  border-radius: 10px;
+  width: 100%;
+  transition: all .3s ease;
+  font-size: var(--font-base);
+  font-family: inherit;
+  min-height: 46px;
+}
+.login-input:focus {
+  border-color: #3b82f6;
+  background: rgba(255,255,255,.15);
+  box-shadow: 0 0 0 3px rgba(59,130,246,.3);
+  outline: none;
+}
+.login-input::placeholder { color: rgba(255,255,255,.4); }
+.login-btn {
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  color: #fff;
+  font-weight: 700;
+  padding: 13px;
+  border-radius: 10px;
+  border: none;
+  width: 100%;
+  cursor: pointer;
+  transition: all .3s ease;
+  font-size: var(--font-base);
+  font-family: inherit;
+  min-height: 48px;
+  touch-action: manipulation;
+}
+.login-btn:hover { background: linear-gradient(135deg, #2563eb, #1e40af); }
+.login-btn:active { transform: scale(.97); }
+.login-btn:disabled { opacity: .7; cursor: not-allowed; }
+
+/* ===== TOGGLE SWITCH ===== */
+.toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; cursor: pointer; top:0; left:0; right:0; bottom:0; background: #cbd5e1; border-radius: 24px; transition: .3s; }
+.toggle-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .3s; }
+input:checked + .toggle-slider { background: var(--primary); }
+input:checked + .toggle-slider:before { transform: translateX(20px); }
+
+/* ===== TABLE ===== */
+.table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.table-responsive table { min-width: 700px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 5px 6px; border: 1px solid var(--border); font-size: .6rem; }
+thead tr { background: #f8fafc; }
+th { font-weight: 700; color: #475569; text-align: left; }
+
+/* ===== SYNC BAR ===== */
+.sync-bar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 8px; margin-bottom: 10px; font-size: .6rem; font-weight: 600; }
+.sync-bar.idle    { background: #f1f5f9; color: #64748b; border: 1px solid var(--border); }
+.sync-bar.syncing { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+.sync-bar.synced  { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+.sync-bar.error   { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinning { animation: spin 1s linear infinite; }
+
+/* ===== DAY-WISE ROW COLORS ===== */
+.dw-above { background: rgba(209,250,229,.3) !important; }
+.dw-below { background: rgba(254,226,226,.3) !important; }
+
+/* ===== MOBILE BOTTOM NAV ===== */
+.mobile-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: #0f172a;
+  z-index: 200;
+  padding: 6px 4px;
+  padding-bottom: calc(6px + var(--safe-bottom));
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+.mobile-bottom-nav button {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: .52rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  padding: 4px 2px;
+  flex: 1;
+  transition: all .2s ease;
+  min-height: 44px;
+  touch-action: manipulation;
+  font-family: inherit;
+  font-weight: 600;
+}
+.mobile-bottom-nav button i { font-size: 17px; }
+.mobile-bottom-nav button.active { color: #3b82f6; }
+
+/* ===== SIDEBAR OVERLAY ===== */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,.6);
+  z-index: 99;
+}
+.sidebar-overlay.open { display: block; }
+
+/* ===== MOBILE HEADER ===== */
+#mobileHeader {
+  display: none;
+  padding: 10px 14px;
+  background: #0f172a;
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+/* ===== PAGE HEADER ===== */
+.page-header { margin-bottom: 14px; }
+.page-header h2 { font-size: 20px; font-weight: 800; margin: 0 0 2px; font-family: 'Outfit', sans-serif; }
+.page-header p  { color: var(--text-muted); font-size: .65rem; margin: 0; }
+
+/* ===== ANIMATIONS ===== */
+@keyframes fadeIn  { from{opacity:0} to{opacity:1} }
+@keyframes slideUp { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
+@keyframes shake   { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-8px)} 40%{transform:translateX(8px)} 60%{transform:translateX(-5px)} 80%{transform:translateX(5px)} }
+
+/* ===== PANEL ANIMATION ===== */
+.panel { animation: fadeIn .25s ease; }
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 768px) {
+  :root { --sidebar-w: 0px; }
+  body { font-size: .8rem; }
+
+  /* FIX: sidebar uses transform, not display:none on mobile */
+  .sidebar {
+    transform: translateX(-280px);
+    width: 280px;
+    z-index: 101;
+    display: flex !important; /* always in DOM, just off-screen */
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-nav-scroll { padding-bottom: 16px; }
+
+  .main-content { margin-left: 0; padding: 8px; padding-bottom: calc(80px + var(--safe-bottom)); }
+  .card { padding: 10px; border-radius: 10px; }
+  .kpi-value { font-size: 1.25rem; }
+  .kpi-card { padding: 10px; }
+  .share-btn-group { gap: 4px; }
+  .share-btn-group .btn-share { font-size: .55rem; padding: 5px 8px; min-height: 28px; }
+  .mobile-bottom-nav { display: flex; }
+  #mobileHeader { display: flex; }
+  .btn { font-size: .65rem; padding: 6px 10px; min-height: 32px; }
+  .btn-lg { font-size: .75rem; padding: 9px 14px; min-height: 40px; }
+  .page-header h2 { font-size: 16px !important; }
+  .chart-container { max-height: 220px; }
+  .dashboard-charts-row { display: block !important; }
+  .dashboard-charts-row .card { margin-bottom: 8px; width: 100%; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 6px !important; }
+  .entry-form-grid { grid-template-columns: 1fr !important; }
+  th, td { padding: 3px 4px !important; font-size: .52rem !important; }
+  input, select { font-size: .65rem; padding: 6px 8px; min-height: 34px; }
+}
+@media (max-width: 400px) {
+  .kpi-value { font-size: 1.1rem; }
+  .kpi-label { font-size: .5rem; }
+  .card { padding: 8px; }
+  .chart-container { max-height: 180px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Sidebar Overlay -->
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<!-- ===== SIDEBAR ===== -->
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-icon"><i class="fas fa-industry" style="color:#fff;font-size:16px;"></i></div>
+    <div>
+      <div style="font-size:13px;font-weight:700;color:#fff;font-family:'Outfit',sans-serif;">Astha Feed</div>
+      <div style="font-size:9px;color:#64748b;">Forecast System v1.0</div>
+    </div>
+  </div>
+
+  <div class="sidebar-nav-scroll">
+    <div style="padding:6px 0;">
+      <div class="sidebar-section-label">Main</div>
+      <a href="#" class="active" onclick="navigateTo('dashboard');return false;" id="nav-dashboard"><i class="fas fa-tachometer-alt"></i>Dashboard</a>
+      <a href="#" onclick="navigateTo('dailyEntry');return false;" id="nav-dailyEntry"><i class="fas fa-edit"></i>Daily Entry</a>
+      <a href="#" onclick="navigateTo('daywise');return false;" id="nav-daywise"><i class="fas fa-calendar-day"></i>Day-wise Report</a>
+      <a href="#" onclick="navigateTo('weeklyForecast');return false;" id="nav-weeklyForecast"><i class="fas fa-calendar-week"></i>Weekly Forecast</a>
+      <a href="#" onclick="navigateTo('reports');return false;" id="nav-reports"><i class="fas fa-chart-bar"></i>Reports</a>
+      <a href="#" onclick="navigateTo('shareReports');return false;" id="nav-shareReports"><i class="fas fa-share-alt"></i>Share</a>
+
+      <div class="sidebar-section-label admin-only" style="margin-top:6px;">Admin</div>
+      <a href="#" onclick="navigateTo('zoneManagement');return false;" id="nav-zoneManagement" class="admin-only"><i class="fas fa-map-marker-alt"></i>Zone Mgmt</a>
+      <a href="#" onclick="navigateTo('userManagement');return false;" id="nav-userManagement" class="admin-only"><i class="fas fa-users-cog"></i>Users</a>
+      <a href="#" onclick="navigateTo('headerRename');return false;" id="nav-headerRename" class="admin-only"><i class="fas fa-tags"></i>Headers</a>
+      <a href="#" onclick="navigateTo('settings');return false;" id="nav-settings" class="admin-only"><i class="fas fa-cog"></i>Settings</a>
+    </div>
+  </div><!-- end sidebar-nav-scroll -->
+
+  <div class="sidebar-footer">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <div style="width:32px;height:32px;background:linear-gradient(135deg,#1a56db,#7c3aed);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;"><i class="fas fa-user" style="color:#fff;font-size:13px;"></i></div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#fff;" id="loggedInUser">Admin</div>
+        <div style="font-size:9px;color:#64748b;" id="userRoleDisplay">Role: Admin</div>
+      </div>
+    </div>
+    <button class="btn btn-danger btn-sm" style="width:100%;" onclick="logout()"><i class="fas fa-sign-out-alt"></i>Logout</button>
+    <div style="text-align:center;margin-top:8px;font-size:7px;color:rgba(148,163,184,.25);">Developed by Md Abu Sad Faysal · v1.0</div>
+  </div>
+</nav>
+
+<!-- ===== MOBILE HEADER ===== -->
+<div id="mobileHeader">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <button onclick="toggleSidebar()" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;padding:4px;" aria-label="Menu"><i class="fas fa-bars"></i></button>
+    <span style="font-weight:700;font-size:13px;font-family:'Outfit',sans-serif;">Astha Feed</span>
+  </div>
+  <button onclick="fetchFromGoogleSheets()" style="background:rgba(255,255,255,.1);border:none;color:#94a3b8;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:.6rem;display:flex;align-items:center;gap:4px;font-family:inherit;" title="Sync">
+    <i class="fas fa-sync" id="mobileRefreshIcon"></i>Sync
+  </button>
+</div>
+
+<!-- ===== MAIN CONTENT ===== -->
+<div class="main-content" id="mainContent">
+
+  <!-- ===== DASHBOARD ===== -->
+  <div id="panel-dashboard" class="panel">
+    <div id="dashboardExportArea">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+        <div class="page-header" style="margin-bottom:0;">
+          <h2>Sales &amp; Collection Dashboard</h2>
+          <p>Astha Feed Industries Ltd. | Uttara, Dhaka-1230</p>
+        </div>
+        <button onclick="fetchFromGoogleSheets()" class="btn btn-info btn-sm">
+          <i class="fas fa-cloud-download-alt" id="dashRefreshIcon"></i>Fetch Cloud
+        </button>
+      </div>
+
+      <div id="syncStatusBar" class="sync-bar idle">
+        <i class="fas fa-circle" style="font-size:.5rem;"></i>
+        <span id="syncStatusText">Ready</span>
+        <span id="syncStatusTime" style="margin-left:auto;opacity:.7;"></span>
+      </div>
+
+      <!-- ===== DATE FILTER BAR ===== -->
+      <div class="card" style="margin-bottom:12px;padding:10px 14px;background:linear-gradient(135deg,#1e293b,#0f172a);border:1px solid rgba(255,255,255,.08);">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:200px;">
+            <i class="fas fa-calendar-day" style="color:#3b82f6;font-size:14px;flex-shrink:0;"></i>
+            <div style="flex:1;">
+              <label style="color:#94a3b8;font-size:.55rem;margin-bottom:2px;letter-spacing:.5px;">FILTER BY DATE</label>
+              <input type="date" id="dashDateFilter"
+                style="background:rgba(255,255,255,.08);border:1.5px solid rgba(255,255,255,.15);color:#fff;border-radius:8px;padding:5px 10px;font-size:.7rem;min-height:32px;width:100%;"
+                onchange="applyDashDateFilter()">
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;">
+            <button class="btn btn-sm" onclick="clearDashDateFilter()"
+              style="background:rgba(255,255,255,.1);color:#94a3b8;border:1px solid rgba(255,255,255,.15);font-size:.6rem;min-height:32px;">
+              <i class="fas fa-times"></i>Clear (Full Month)
+            </button>
+            <button class="btn btn-sm" onclick="setDashDateToday()"
+              style="background:#1a56db;color:#fff;font-size:.6rem;min-height:32px;">
+              <i class="fas fa-calendar-check"></i>Today
+            </button>
+          </div>
+          <div id="dashFilterBadge" style="display:none;background:#1a56db22;border:1px solid #1a56db55;border-radius:20px;padding:3px 10px;font-size:.6rem;color:#93c5fd;white-space:nowrap;">
+            <i class="fas fa-filter"></i> <span id="dashFilterBadgeText"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI Grid -->
+      <div class="kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:14px;">
+        <div class="kpi-card blue">
+          <div class="kpi-label">Monthly Target</div>
+          <div class="kpi-value" id="kpiMonthlyTarget">0</div>
+          <div class="kpi-sub">M.T (Metric Ton)</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-label">Total Sales</div>
+          <div class="kpi-value" id="kpiTotalSales">0</div>
+          <div class="kpi-sub">M.T Actual</div>
+        </div>
+        <div class="kpi-card amber">
+          <div class="kpi-label">Sales Achievement</div>
+          <div class="kpi-value" id="kpiAchievement">0%</div>
+          <div class="kpi-sub">vs Forecast</div>
+        </div>
+        <div class="kpi-card red">
+          <div class="kpi-label">Collection</div>
+          <div class="kpi-value" id="kpiCollection">0</div>
+          <div class="kpi-sub">BDT Actual</div>
+        </div>
+        <div class="kpi-card purple">
+          <div class="kpi-label">Coll Achievement</div>
+          <div class="kpi-value" id="kpiCollAchv">0%</div>
+          <div class="kpi-sub">vs Forecast</div>
+        </div>
+      </div>
+
+      <!-- Charts Row 1 -->
+      <div class="dashboard-charts-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+        <div class="card"><h4 style="font-weight:700;margin-bottom:6px;font-size:.7rem;">Zone-wise Sales (M.T)</h4><div class="chart-container"><canvas id="chartSalesBar"></canvas></div></div>
+        <div class="card"><h4 style="font-weight:700;margin-bottom:6px;font-size:.7rem;">Zone-wise Collection (BDT Cr)</h4><div class="chart-container"><canvas id="chartCollectionBar"></canvas></div></div>
+      </div>
+      <!-- Charts Row 2 -->
+      <div class="dashboard-charts-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+        <div class="card"><h4 style="font-weight:700;margin-bottom:6px;font-size:.7rem;">Achievement % by Zone</h4><div class="chart-container"><canvas id="chartAchievement"></canvas></div></div>
+        <div class="card"><h4 style="font-weight:700;margin-bottom:6px;font-size:.7rem;">Sales vs Target Trend</h4><div class="chart-container"><canvas id="chartTrend"></canvas></div></div>
+      </div>
+
+      <!-- Summary Table -->
+      <div class="card" id="summaryTableCard">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+          <h4 style="font-weight:700;margin:0;font-size:.7rem;">Zone-wise Summary — Day <span id="currentDayDisplay">—</span></h4>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:4px;">
+              <label style="margin:0;font-size:.6rem;white-space:nowrap;">Current Day:</label>
+              <input type="number" id="currentDayInput" min="1" max="31" style="width:54px;min-height:28px;font-size:.6rem;padding:3px 6px;" onchange="updateCurrentDay(this.value)">
+            </div>
+            <button class="btn btn-share btn-share-print btn-sm" onclick="printStatement()" title="Print"><i class="fas fa-print"></i>Print</button>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table id="summaryTable">
+            <thead>
+              <tr>
+                <th>Zone</th>
+                <th>Monthly<br>Target(MT)</th>
+                <th>Sales<br>Fcst(MT)</th>
+                <th>Actual<br>Sales(MT)</th>
+                <th>Fcst<br>Achv%</th>
+                <th>Till-Now<br>Target(MT)</th>
+                <th>Cum<br>Sales(MT)</th>
+                <th>Till-Now<br>Achv%</th>
+                <th>Coll<br>Fcst(BDT)</th>
+                <th>Actual<br>Coll(BDT)</th>
+                <th>Coll<br>Achv%</th>
+              </tr>
+            </thead>
+            <tbody id="summaryTableBody"></tbody>
+            <tfoot id="summaryTableFoot" style="font-weight:700;background:#f8fafc;"></tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- Share Dashboard -->
+      <div class="card" style="margin-top:10px;">
+        <h4 style="font-weight:700;margin-bottom:8px;font-size:.7rem;">Share Dashboard</h4>
+        <div class="share-btn-group">
+          <button class="btn btn-share btn-share-pdf btn-sm" onclick="exportDashboardPDF()"><i class="fas fa-file-pdf"></i>PDF</button>
+          <button class="btn btn-share btn-share-jpeg btn-sm" onclick="exportDashboardJPEG()"><i class="fas fa-image"></i>JPEG</button>
+          <button class="btn btn-share btn-share-whatsapp btn-sm" onclick="shareDashboardWhatsApp()"><i class="fab fa-whatsapp"></i>WA</button>
+          <button class="btn btn-share btn-share-email btn-sm" onclick="shareDashboardEmail()"><i class="fas fa-envelope"></i>Email</button>
+          <button class="btn btn-share btn-share-print btn-sm" onclick="printDashboard()"><i class="fas fa-print"></i>Print</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== DAILY ENTRY ===== -->
+  <div id="panel-dailyEntry" class="panel" style="display:none;">
+    <div class="page-header">
+      <h2>Daily Sales &amp; Collection Entry</h2>
+      <p>Data saves locally AND syncs to Cloud automatically</p>
+    </div>
+    <div class="card" style="margin-bottom:10px;">
+      <div class="entry-form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div><label>Zone</label><select id="entryZone"><option value="">-- Select Zone --</option></select></div>
+        <div><label>Date</label><input type="date" id="entryDate"></div>
+      </div>
+      <div class="entry-form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div><label>Monthly Target (M.T)</label><input type="number" id="entryMonthlyTarget" placeholder="0.00" step="any" min="0"></div>
+        <div><label>Sales Forecast (M.T)</label><input type="number" id="entrySalesForecast" placeholder="0.00" step="any" min="0"></div>
+      </div>
+      <div class="entry-form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div><label>Actual Sales (M.T)</label><input type="number" id="entrySales" placeholder="0.00" step="any" min="0"></div>
+        <div><label>Collection Forecast (BDT)</label><input type="number" id="entryCollectionForecast" placeholder="0" step="any" min="0"></div>
+      </div>
+      <div class="entry-form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+        <div><label>Actual Collection (BDT)</label><input type="number" id="entryCollection" placeholder="0" step="any" min="0"></div>
+        <div><label>Remarks</label><input type="text" id="entryRemarks" placeholder="Optional notes..."></div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" onclick="saveDailyEntry()"><i class="fas fa-save"></i>Save &amp; Sync</button>
+        <button class="btn btn-outline btn-sm" onclick="clearEntryForm()"><i class="fas fa-eraser"></i>Clear</button>
+        <button class="btn btn-secondary btn-sm" onclick="syncToGoogleSheets()"><i class="fas fa-cloud-upload-alt"></i>Sync Now</button>
+        <button class="btn btn-info btn-sm" onclick="fetchFromGoogleSheets()"><i class="fas fa-cloud-download-alt"></i>Fetch Cloud</button>
+      </div>
+      <p id="entryStatus" style="margin-top:6px;font-size:.6rem;color:var(--text-muted);"></p>
+    </div>
+
+    <!-- Recent Entries -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+        <h4 style="font-weight:700;margin:0;font-size:.7rem;">Recent Entries</h4>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <label style="margin:0;font-size:.6rem;white-space:nowrap;">Filter Zone:</label>
+          <select id="recentFilterZone" style="width:auto;min-height:26px;font-size:.6rem;padding:3px 22px 3px 6px;" onchange="refreshRecentEntries()">
+            <option value="All">All Zones</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-responsive" style="max-height:320px;overflow-y:auto;">
+        <table id="recentEntriesTable">
+          <thead><tr><th>Date</th><th>Zone</th><th>Mth Tgt</th><th>Fcst</th><th>Sales</th><th>Coll Fcst</th><th>Coll</th><th>User</th><th>Act</th></tr></thead>
+          <tbody id="recentEntriesBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== DAY-WISE REPORT ===== -->
+  <div id="panel-daywise" class="panel" style="display:none;">
+    <div id="daywiseExportArea">
+      <div class="page-header">
+        <h2>Day-wise Target vs Sales Report</h2>
+        <p>Filter by date range and zone to see daily performance</p>
+      </div>
+
+      <!-- Filters -->
+      <div class="card" style="margin-bottom:10px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;align-items:end;">
+          <div><label>From Date</label><input type="date" id="dwFrom"></div>
+          <div><label>To Date</label><input type="date" id="dwTo"></div>
+          <div><label>Zone</label><select id="dwZone"><option value="All">All Zones</option></select></div>
+          <div><button class="btn btn-primary btn-sm" onclick="refreshDaywise()" style="width:100%;"><i class="fas fa-filter"></i>Apply Filter</button></div>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div class="kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-bottom:12px;">
+        <div class="kpi-card blue"><div class="kpi-label">Days Shown</div><div class="kpi-value" id="dwKpiDays">0</div></div>
+        <div class="kpi-card amber"><div class="kpi-label">Period Target(MT)</div><div class="kpi-value" id="dwKpiTarget">0</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Period Sales(MT)</div><div class="kpi-value" id="dwKpiSales">0</div></div>
+        <div class="kpi-card red"><div class="kpi-label">Sales Achv%</div><div class="kpi-value" id="dwKpiAchv">0%</div></div>
+        <div class="kpi-card purple"><div class="kpi-label">Period Coll(BDT)</div><div class="kpi-value" id="dwKpiColl">0</div></div>
+      </div>
+
+      <!-- Charts -->
+      <div class="card" style="margin-bottom:10px;">
+        <h4 style="font-weight:700;margin-bottom:6px;font-size:.7rem;">Daily Sales vs Daily Target</h4>
+        <div class="chart-container" style="max-height:260px;"><canvas id="daywiseChart"></canvas></div>
+      </div>
+      <div class="card" style="margin-bottom:10px;">
+        <h4 style="font-weight:700;margin-bottom:6px;font-size:.7rem;">Daily Collection vs Collection Forecast</h4>
+        <div class="chart-container" style="max-height:220px;"><canvas id="daywiseCollChart"></canvas></div>
+      </div>
+
+      <!-- Table -->
+      <div class="card">
+        <h4 style="font-weight:700;margin-bottom:8px;font-size:.7rem;">Day-wise Detail Table</h4>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Zone</th>
+                <th>Day Target<br>(MT)</th>
+                <th>Sales<br>Fcst(MT)</th>
+                <th>Actual<br>Sales(MT)</th>
+                <th>vs Fcst%</th>
+                <th>vs Day<br>Target%</th>
+                <th>Coll<br>Fcst(BDT)</th>
+                <th>Actual<br>Coll(BDT)</th>
+                <th>Coll<br>Achv%</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="daywiseTableBody"></tbody>
+            <tfoot id="daywiseTableFoot" style="font-weight:700;background:#f8fafc;"></tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- Share -->
+      <div class="card" style="margin-top:10px;">
+        <h4 style="font-weight:700;margin-bottom:8px;font-size:.7rem;">Share Day-wise Report</h4>
+        <div class="share-btn-group">
+          <button class="btn btn-share btn-share-pdf btn-sm" onclick="exportDaywisePDF()"><i class="fas fa-file-pdf"></i>PDF</button>
+          <button class="btn btn-share btn-share-csv btn-sm" onclick="exportDaywiseCSV()"><i class="fas fa-file-csv"></i>CSV</button>
+          <button class="btn btn-share btn-share-print btn-sm" onclick="printDaywise()"><i class="fas fa-print"></i>Print</button>
+          <button class="btn btn-share btn-share-whatsapp btn-sm" onclick="shareDaywiseWhatsApp()"><i class="fab fa-whatsapp"></i>WA</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== WEEKLY FORECAST ===== -->
+  <div id="panel-weeklyForecast" class="panel" style="display:none;">
+    <div class="page-header">
+      <h2>Weekly Forecast</h2>
+      <p>Set weekly sales &amp; collection forecast by zone</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+      <label class="toggle-switch"><input type="checkbox" id="weeklyToggle" checked onchange="toggleWeeklySection()"><span class="toggle-slider"></span></label>
+      <span style="font-weight:600;font-size:.7rem;">Show Weekly Forecast</span>
+    </div>
+    <div id="weeklySection">
+      <div class="card" style="margin-bottom:10px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <div><label>Week Range Label</label><input type="text" id="weeklyDateRange" placeholder="01-05-2026 to 07-05-2026"></div>
+          <div><label>Start Date</label><input type="date" id="weeklyStartDate"></div>
+          <div><label>End Date</label><input type="date" id="weeklyEndDate"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h4 style="font-weight:700;margin-bottom:8px;font-size:.7rem;">Weekly Forecast by Zone</h4>
+        <div class="table-responsive">
+          <table id="weeklyTable">
+            <thead><tr><th>Zone</th><th>Sales Fcst (M.T)</th><th>Coll Fcst (BDT)</th><th>Status</th></tr></thead>
+            <tbody id="weeklyTableBody"></tbody>
+          </table>
+        </div>
+        <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="saveWeeklyForecast()"><i class="fas fa-save"></i>Save &amp; Sync Weekly</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== REPORTS ===== -->
+  <div id="panel-reports" class="panel" style="display:none;">
+    <div id="reportsExportArea">
+      <div class="page-header">
+        <h2>Reports &amp; Analytics</h2>
+        <p>Comprehensive zone-wise analysis</p>
+      </div>
+      <div class="dashboard-charts-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+        <div class="card"><h4 style="font-weight:700;font-size:.65rem;margin-bottom:6px;">Achievement % by Zone</h4><div class="chart-container"><canvas id="gaugeChart"></canvas></div></div>
+        <div class="card"><h4 style="font-weight:700;font-size:.65rem;margin-bottom:6px;">Collection by Zone (BDT Cr)</h4><div class="chart-container"><canvas id="heatmapChart"></canvas></div></div>
+      </div>
+      <div class="dashboard-charts-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+        <div class="card"><h4 style="font-weight:700;font-size:.65rem;margin-bottom:6px;">Zone Sales Trend</h4><div class="chart-container"><canvas id="dailyTrendChart"></canvas></div></div>
+        <div class="card"><h4 style="font-weight:700;font-size:.65rem;margin-bottom:6px;">Sales vs Target Comparison</h4><div class="chart-container"><canvas id="radarChart"></canvas></div></div>
+      </div>
+      <div class="card" id="reportPrintArea">
+        <h4 style="font-weight:700;margin-bottom:6px;font-size:.7rem;">Full Zone Report</h4>
+        <div id="fullReportTable"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:10px;">
+      <h4 style="font-weight:700;margin-bottom:8px;font-size:.7rem;">Share Reports</h4>
+      <div class="share-btn-group">
+        <button class="btn btn-share btn-share-pdf btn-sm" onclick="exportReportsPDF()"><i class="fas fa-file-pdf"></i>PDF</button>
+        <button class="btn btn-share btn-share-jpeg btn-sm" onclick="exportReportsJPEG()"><i class="fas fa-image"></i>JPEG</button>
+        <button class="btn btn-share btn-share-whatsapp btn-sm" onclick="shareReportsWhatsApp()"><i class="fab fa-whatsapp"></i>WA</button>
+        <button class="btn btn-share btn-share-email btn-sm" onclick="shareReportsEmail()"><i class="fas fa-envelope"></i>Email</button>
+        <button class="btn btn-share btn-share-print btn-sm" onclick="printReports()"><i class="fas fa-print"></i>Print</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ZONE MANAGEMENT ===== -->
+  <div id="panel-zoneManagement" class="panel admin-only-panel" style="display:none;">
+    <div class="page-header">
+      <h2>Zone Management</h2>
+      <p>Add, edit, remove zones — changes sync to Cloud</p>
+    </div>
+    <div class="card" style="margin-bottom:10px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
+        <div style="flex:1;min-width:120px;"><label>Zone Name</label><input type="text" id="newZoneName" placeholder="e.g. Rajshahi"></div>
+        <div style="flex:1;min-width:80px;"><label>Code</label><input type="text" id="newZoneCode" placeholder="RAJ"></div>
+        <div style="flex:1;min-width:100px;"><label>Monthly Target (MT)</label><input type="number" id="newZoneTarget" placeholder="0" step="any" min="0"></div>
+        <div><button class="btn btn-primary btn-sm" onclick="addZone()"><i class="fas fa-plus"></i>Add &amp; Sync</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <h4 style="font-weight:700;margin-bottom:8px;font-size:.7rem;">Existing Zones</h4>
+      <div class="table-responsive">
+        <table id="zonesTable">
+          <thead><tr><th>Zone Name</th><th>Code</th><th>Monthly Target (M.T)</th><th>Action</th></tr></thead>
+          <tbody id="zonesTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== USER MANAGEMENT ===== -->
+  <div id="panel-userManagement" class="panel admin-only-panel" style="display:none;">
+    <div class="page-header">
+      <h2>User Management</h2>
+      <p>Create/manage accounts — syncs to Cloud immediately</p>
+    </div>
+    <div class="card" style="margin-bottom:10px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end;">
+        <div><label>User ID</label><input type="text" id="newUserId" placeholder="e.g. zonal_raj" autocomplete="off"></div>
+        <div>
+          <label>Password</label>
+          <div style="position:relative;">
+            <input type="password" id="newUserPass" placeholder="Set password" autocomplete="new-password" style="padding-right:40px;">
+            <button type="button" onclick="togglePassVis('newUserPass',this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#64748b;padding:2px;"><i class="fas fa-eye"></i></button>
+          </div>
+        </div>
+        <div><label>Zone</label><select id="newUserZone"><option value="">-- Select Zone --</option></select></div>
+        <div><label>Role</label><select id="newUserRole"><option value="zonal">Zonal</option><option value="admin">Admin</option></select></div>
+        <div style="grid-column:1/-1;"><button class="btn btn-primary btn-sm" onclick="addUser()" style="width:100%;"><i class="fas fa-user-plus"></i>Add User &amp; Sync</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <h4 style="font-weight:700;margin-bottom:8px;font-size:.7rem;">Registered Users</h4>
+      <div class="table-responsive">
+        <table id="usersTable">
+          <thead><tr><th>User ID</th><th>Zone</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="usersTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== HEADER RENAME ===== -->
+  <div id="panel-headerRename" class="panel admin-only-panel" style="display:none;">
+    <div class="page-header">
+      <h2>Rename Headers</h2>
+      <p>Customize column headers across the app</p>
+    </div>
+    <div class="card">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;" id="headerRenameFields"></div>
+      <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="saveHeaderRenames()"><i class="fas fa-check"></i>Save Headers</button>
+    </div>
+  </div>
+
+  <!-- ===== SETTINGS ===== -->
+  <div id="panel-settings" class="panel admin-only-panel" style="display:none;">
+    <div class="page-header">
+      <h2>Google Sheets Settings</h2>
+      <p>Configure Cloud sync — data is shared across all devices</p>
+    </div>
+    <div class="card" style="background:#fffbeb;border-color:#fde68a;margin-bottom:10px;">
+      <p style="font-size:.6rem;color:#92400e;font-weight:600;margin:0;">Your Google Apps Script must support <code>doGet</code> with <code>action=getData</code>. See the HTML source comment at the top for the required GAS code.</p>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:6px 0;">
+        <label class="toggle-switch"><input type="checkbox" id="autoSyncToggle" checked onchange="toggleAutoSync(this.checked)"><span class="toggle-slider"></span></label>
+        <span style="font-weight:600;font-size:.65rem;">Auto-Sync to Cloud after every save</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:6px 0;">
+        <label class="toggle-switch"><input type="checkbox" id="autoFetchToggle" checked onchange="toggleAutoFetch(this.checked)"><span class="toggle-slider"></span></label>
+        <span style="font-weight:600;font-size:.65rem;">Auto-Fetch from Cloud every 60 seconds</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label>Sheet ID</label><input type="text" id="gsSheetId" placeholder="Google Sheet ID"></div>
+        <div><label>Apps Script URL</label><input type="text" id="gsApiKey" placeholder="Deployment URL"></div>
+        <div><label>Daily Sheet Name</label><input type="text" id="gsSheetName" value="DailyEntries"></div>
+        <div><label>Weekly Sheet Name</label><input type="text" id="gsWeeklySheet" value="WeeklyForecast"></div>
+        <div><label>Zones Sheet Name</label><input type="text" id="gsZonesSheet" value="Zones"></div>
+        <div><label>Users Sheet Name</label><input type="text" id="gsUsersSheet" value="Users"></div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" onclick="saveGSSettings()"><i class="fas fa-save"></i>Save Settings</button>
+        <button class="btn btn-secondary btn-sm" onclick="testGSConnection()"><i class="fas fa-plug"></i>Test Connection</button>
+        <button class="btn btn-accent btn-sm" onclick="syncToGoogleSheets()"><i class="fas fa-cloud-upload-alt"></i>Sync All Now</button>
+        <button class="btn btn-info btn-sm" onclick="fetchFromGoogleSheets()"><i class="fas fa-cloud-download-alt"></i>Fetch Now</button>
+      </div>
+      <p id="gsStatus" style="margin-top:6px;font-size:.6rem;"></p>
+    </div>
+  </div>
+
+  <!-- ===== SHARE REPORTS ===== -->
+  <div id="panel-shareReports" class="panel" style="display:none;">
+    <div class="page-header">
+      <h2>Share Reports</h2>
+      <p>Export &amp; share in multiple formats</p>
+    </div>
+    <div class="card" style="margin-bottom:10px;">
+      <h4 style="font-weight:700;margin-bottom:8px;font-size:.7rem;">Quick Export</h4>
+      <div class="share-btn-group">
+        <button class="btn btn-share btn-share-pdf btn-sm" onclick="exportPDF()"><i class="fas fa-file-pdf"></i>PDF</button>
+        <button class="btn btn-share btn-share-jpeg btn-sm" onclick="exportJPEG()"><i class="fas fa-image"></i>JPEG</button>
+        <button class="btn btn-share btn-share-text btn-sm" onclick="exportText()"><i class="fas fa-file-alt"></i>Text</button>
+        <button class="btn btn-share btn-share-csv btn-sm" onclick="exportCSV()"><i class="fas fa-file-csv"></i>CSV</button>
+        <button class="btn btn-share btn-share-print btn-sm" onclick="printReport()"><i class="fas fa-print"></i>Print</button>
+        <button class="btn btn-share btn-share-whatsapp btn-sm" onclick="shareWhatsApp()"><i class="fab fa-whatsapp"></i>WA</button>
+        <button class="btn btn-share btn-share-email btn-sm" onclick="shareEmail()"><i class="fas fa-envelope"></i>Email</button>
+      </div>
+    </div>
+    <div class="card" id="sharePreviewArea">
+      <h4 style="font-weight:700;margin-bottom:6px;font-size:.7rem;">Preview</h4>
+      <div id="sharePreviewContent"></div>
+    </div>
+  </div>
+
+</div><!-- end main-content -->
+
+<!-- ===== MOBILE BOTTOM NAV ===== -->
+<div class="mobile-bottom-nav" id="mobileBottomNav">
+  <button onclick="navigateTo('dashboard')" class="active" id="mb-dashboard"><i class="fas fa-tachometer-alt"></i>Dashboard</button>
+  <button onclick="navigateTo('dailyEntry')" id="mb-dailyEntry"><i class="fas fa-edit"></i>Entry</button>
+  <button onclick="navigateTo('daywise')" id="mb-daywise"><i class="fas fa-calendar-day"></i>Day-wise</button>
+  <button onclick="navigateTo('reports')" id="mb-reports"><i class="fas fa-chart-bar"></i>Reports</button>
+  <button onclick="toggleSidebar()" id="mb-menu"><i class="fas fa-bars"></i>More</button>
+</div>
+
+<!-- ===== LOGIN OVERLAY ===== -->
+<!-- FIX: loginOverlay IS the full-screen backdrop (no nested overlay div) -->
+<div id="loginOverlay">
+  <div class="login-card">
+    <div style="margin-bottom:12px;"><div style="width:60px;height:60px;background:linear-gradient(135deg,#1a56db,#7c3aed);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto;"><i class="fas fa-industry" style="color:#fff;font-size:26px;"></i></div></div>
+    <h2 style="color:#fff;font-weight:800;font-size:20px;margin-bottom:2px;font-family:'Outfit',sans-serif;">Astha Feed Industries</h2>
+    <p style="color:#94a3b8;font-size:.65rem;margin-bottom:20px;">Sales &amp; Collection Forecast v1.0</p>
+
+    <div style="text-align:left;margin-bottom:10px;">
+      <label style="color:#cbd5e1;font-size:.6rem;text-transform:uppercase;letter-spacing:1px;">User ID</label>
+      <input type="text" id="loginUserId" placeholder="Enter User ID" class="login-input" autocomplete="username" style="margin-top:4px;">
+    </div>
+    <div style="text-align:left;margin-bottom:6px;">
+      <label style="color:#cbd5e1;font-size:.6rem;text-transform:uppercase;letter-spacing:1px;">Password</label>
+      <div style="position:relative;margin-top:4px;">
+        <input type="password" id="loginPassword" placeholder="Enter Password" class="login-input" autocomplete="current-password" style="padding-right:44px;">
+        <button type="button" onclick="togglePassVis('loginPassword',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:rgba(255,255,255,.5);padding:4px;"><i class="fas fa-eye"></i></button>
+      </div>
+    </div>
+    <p id="loginError" style="color:#f87171;font-size:.6rem;margin-bottom:12px;min-height:16px;text-align:left;"></p>
+    <button class="login-btn" id="loginButton" onclick="doLogin()">
+      <i class="fas fa-sign-in-alt" style="margin-right:6px;"></i>Login
+    </button>
+    <p style="color:#475569;font-size:.5rem;margin-top:14px;">Developed by Md Abu Sad Faysal · v1.0</p>
+  </div>
+</div>
+
+<div id="toastContainer" style="position:fixed;top:14px;right:14px;z-index:9999;display:flex;flex-direction:column;gap:6px;pointer-events:none;"></div>
+
+<script>
+// ============================================================
+// ASTHA FEED INDUSTRIES v1.0 — COMPLETE FIXED SYSTEM
+// Fixes: login overlay, duplicate toggleSidebar, mobile sidebar,
+//        admin panel visibility, radar chart, date persistence,
+//        refreshDaywise on data load, password visibility toggle
+// ============================================================
+
+const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwliPbzdAWmj40jY1P31KKlkQB18YZQlUHrk49QnXd-TueboGlxiW1f3oXy5-WstkbW/exec';
+const DEFAULT_SHEET_ID   = '1kjBhQ4tebowzqAnF2U3qvgu3Ak396l1jFXyY8hqr_kI';
+
+const DEFAULT_USERS = [
+  { userId:'Faysal',    password:'1711355995', zone:'All',          role:'admin',  status:'active' },
+  { userId:'zonal_mym', password:'mym123',      zone:'Mymensingh',   role:'zonal',  status:'active' },
+  { userId:'zonal_cum', password:'cum123',      zone:'Cumilla',      role:'zonal',  status:'active' },
+  { userId:'zonal_khu', password:'khu123',      zone:'Khulna',       role:'zonal',  status:'active' },
+  { userId:'zonal_nbg', password:'nbg123',      zone:'North Bengal', role:'zonal',  status:'active' },
+  { userId:'zonal_ctg', password:'ctg123',      zone:'Chittagong',   role:'zonal',  status:'active' },
+  { userId:'zonal_bar', password:'bar123',      zone:'Barishal',     role:'zonal',  status:'active' },
+  { userId:'zonal_syl', password:'syl123',      zone:'Sylhet',       role:'zonal',  status:'active' },
+  { userId:'zonal_dhk', password:'dhk123',      zone:'Dhaka',        role:'zonal',  status:'active' },
+];
+const DEFAULT_ZONES = [
+  {name:'Mymensingh',  code:'MYM', monthlyTarget:0},
+  {name:'Cumilla',     code:'CUM', monthlyTarget:0},
+  {name:'Khulna',      code:'KHU', monthlyTarget:0},
+  {name:'North Bengal',code:'NBG', monthlyTarget:0},
+  {name:'Chittagong',  code:'CTG', monthlyTarget:0},
+  {name:'Barishal',    code:'BAR', monthlyTarget:0},
+  {name:'Sylhet',      code:'SYL', monthlyTarget:0},
+  {name:'Dhaka',       code:'DHK', monthlyTarget:0},
+];
+const DEFAULT_HEADERS = {
+  salesForecast:'Sales Forecast', sales:'Sales',
+  collectionForecast:'Collection Forecast', collection:'Collection',
+  achievement:'Achievement %', tillNowTarget:'Till Now Target', tillNowCumulative:'Till Now Cum. Sales'
+};
+
+let appState = {
+  zones:           [...DEFAULT_ZONES],
+  users:           [...DEFAULT_USERS],
+  dailyEntries:    [],
+  weeklyForecasts: [],
+  headers:         {...DEFAULT_HEADERS},
+  gsSettings: {
+    sheetId:     DEFAULT_SHEET_ID,
+    apiKey:      DEFAULT_SCRIPT_URL,
+    sheetName:   'DailyEntries',
+    weeklySheet: 'WeeklyForecast',
+    zonesSheet:  'Zones',
+    usersSheet:  'Users',
+  },
+  currentUser:     null,
+  currentDay:      new Date().getDate(),
+  weeklyVisible:   true,
+  weeklyDateRange: '',
+  rememberLogin:   false,
+  autoSync:        true,
+  autoFetch:       true,
+  dashDateFilter:  '',
+};
+
+let idleTimeout, autoFetchInterval, chartInstances = {};
+
+// ============================================================
+// INIT
+// ============================================================
+// ============================================================
+// PRE-LOGIN USER FETCH — ensures cloud users can login on mobile
+// ============================================================
+async function prefetchUsersFromCloud() {
+  const apiUrl  = appState.gsSettings.apiKey;
+  const sheetId = appState.gsSettings.sheetId;
+  if (!apiUrl || !sheetId) return;
+  try {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 6000);
+    const url  = apiUrl + '?action=getData&sheetId=' + encodeURIComponent(sheetId);
+    const resp = await fetch(url, { signal: controller.signal });
+    clearTimeout(tid);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.status !== 'success') return;
+    if (data.users && data.users.length > 0) {
+      data.users.forEach(cu => {
+        if (!cu.userId || !cu.password) return;
+        const idx = appState.users.findIndex(u => u.userId === cu.userId);
+        if (idx >= 0) appState.users[idx] = {...appState.users[idx], ...cu};
+        else appState.users.push(cu);
+      });
+      saveState();
+    }
+  } catch(e) { /* silent — use default/local users */ }
+}
+
+async function initApp() {
+  loadState();
+  setupResponsive();
+  if (!appState.currentUser) {
+    // Pre-fetch users from Cloud so admin-created users can login on mobile
+    await prefetchUsersFromCloud();
+    showLoginScreen();
+  } else {
+    hideLoginScreen();
+    initializeUI();
+    refreshAllData();
+    resetIdleTimer();
+    if (appState.autoFetch) {
+      setTimeout(() => fetchFromGoogleSheets(), 1500);
+      startAutoFetch();
+    }
+  }
+  ['mousemove','keydown','click','scroll'].forEach(ev => document.addEventListener(ev, resetIdleTimer));
+  document.addEventListener('touchstart', resetIdleTimer, {passive:true});
+}
+
+function setupResponsive() {
+  const isMobile = window.innerWidth <= 768;
+  const mh  = document.getElementById('mobileHeader');
+  const mbn = document.getElementById('mobileBottomNav');
+  if (mh)  mh.style.display  = isMobile ? 'flex' : 'none';
+  if (mbn) mbn.style.display = isMobile ? 'flex' : 'none';
+  // FIX: On desktop, sidebar is always visible (no transform needed)
+  // On mobile, sidebar uses CSS transform (display:flex always, transform slides it)
+  const sb = document.getElementById('sidebar');
+  if (sb) {
+    if (!isMobile) {
+      sb.style.transform = '';
+      sb.classList.remove('open');
+    }
+  }
+}
+
+function resetIdleTimer() {
+  clearTimeout(idleTimeout);
+  if (appState.currentUser) idleTimeout = setTimeout(logout, 25 * 60 * 1000);
+}
+
+// ============================================================
+// STATE PERSISTENCE
+// ============================================================
+function loadState() {
+  try {
+    const saved = localStorage.getItem('asthaForecastState_v1');
+    if (saved) {
+      const p = JSON.parse(saved);
+      appState.zones           = p.zones || [...DEFAULT_ZONES];
+      // Merge users: default users always present, cloud/saved users override
+      const merged = [...DEFAULT_USERS];
+      (p.users || []).forEach(su => {
+        const i = merged.findIndex(u => u.userId === su.userId);
+        if (i >= 0) merged[i] = su; else merged.push(su);
+      });
+      appState.users           = merged;
+      appState.dailyEntries    = p.dailyEntries    || [];
+      appState.weeklyForecasts = p.weeklyForecasts || [];
+      appState.headers         = {...DEFAULT_HEADERS, ...(p.headers || {})};
+      appState.gsSettings      = {...appState.gsSettings, ...(p.gsSettings || {})};
+      if (!appState.gsSettings.sheetId) appState.gsSettings.sheetId = DEFAULT_SHEET_ID;
+      if (!appState.gsSettings.apiKey)  appState.gsSettings.apiKey  = DEFAULT_SCRIPT_URL;
+      appState.currentUser     = p.rememberLogin ? (p.currentUser || null) : null;
+      appState.currentDay      = p.currentDay     || new Date().getDate();
+      appState.weeklyVisible   = p.weeklyVisible  !== undefined ? p.weeklyVisible : true;
+      appState.weeklyDateRange = p.weeklyDateRange || '';
+      appState.rememberLogin   = p.rememberLogin  || false;
+      appState.autoSync        = p.autoSync        !== undefined ? p.autoSync  : true;
+      appState.autoFetch       = p.autoFetch       !== undefined ? p.autoFetch : true;
+    }
+  } catch(e) { resetToDefaults(); }
+}
+
+function resetToDefaults() {
+  appState.zones = [...DEFAULT_ZONES];
+  appState.users = [...DEFAULT_USERS];
+  appState.headers = {...DEFAULT_HEADERS};
+  appState.dailyEntries = [];
+  appState.weeklyForecasts = [];
+  appState.currentDay = new Date().getDate();
+  appState.autoSync = true;
+  appState.autoFetch = true;
+}
+
+function saveState() {
+  try {
+    localStorage.setItem('asthaForecastState_v1', JSON.stringify({
+      zones:           appState.zones,
+      users:           appState.users,
+      dailyEntries:    appState.dailyEntries,
+      weeklyForecasts: appState.weeklyForecasts,
+      headers:         appState.headers,
+      gsSettings:      appState.gsSettings,
+      currentUser:     appState.currentUser,
+      currentDay:      appState.currentDay,
+      weeklyVisible:   appState.weeklyVisible,
+      weeklyDateRange: appState.weeklyDateRange,
+      rememberLogin:   appState.rememberLogin,
+      autoSync:        appState.autoSync,
+      autoFetch:       appState.autoFetch,
+    }));
+  } catch(e) { showToast('Storage full. Clear old data.', 'danger'); }
+}
+
+// ============================================================
+// LOGIN — FIX: loginOverlay IS the backdrop, use display:flex
+// ============================================================
+function showLoginScreen() {
+  const lo = document.getElementById('loginOverlay');
+  if (lo) lo.style.display = 'flex';
+  // Hide app chrome
+  const sb  = document.getElementById('sidebar');
+  const mh  = document.getElementById('mobileHeader');
+  const mbn = document.getElementById('mobileBottomNav');
+  const mc  = document.getElementById('mainContent');
+  if (sb)  sb.style.visibility  = 'hidden';
+  if (mh)  mh.style.display     = 'none';
+  if (mbn) mbn.style.display    = 'none';
+  if (mc)  mc.style.visibility  = 'hidden';
+}
+
+function hideLoginScreen() {
+  const lo = document.getElementById('loginOverlay');
+  if (lo) lo.style.display = 'none';
+  const mc = document.getElementById('mainContent');
+  const sb = document.getElementById('sidebar');
+  if (mc) mc.style.visibility = '';
+  if (sb) sb.style.visibility = '';
+  setupResponsive();
+}
+
+function doLogin() {
+  const userId   = (document.getElementById('loginUserId').value   || '').trim();
+  const password = (document.getElementById('loginPassword').value || '').trim();
+  const loginBtn = document.getElementById('loginButton');
+  const errorEl  = document.getElementById('loginError');
+
+  errorEl.textContent = '';
+  if (!userId || !password) {
+    errorEl.textContent = 'Please enter User ID and Password.';
+    return;
+  }
+
+  // FIX: compare against current appState.users (includes cloud-synced users)
+  const user = appState.users.find(u =>
+    u.userId === userId && u.password === password
+  );
+
+  if (user) {
+    if (user.status !== 'active') {
+      errorEl.textContent = 'Account deactivated. Contact admin.';
+      return;
+    }
+    loginBtn.innerHTML  = '<i class="fas fa-spinner fa-pulse"></i>Logging in...';
+    loginBtn.disabled   = true;
+    setTimeout(() => {
+      appState.currentUser  = user;
+      appState.rememberLogin = true;
+      saveState();
+      hideLoginScreen();
+      initializeUI();
+      refreshAllData();
+      resetIdleTimer();
+      if (appState.autoFetch) {
+        setTimeout(() => fetchFromGoogleSheets(), 800);
+        startAutoFetch();
+      }
+      showToast(`Welcome, ${user.userId}!`, 'success');
+      loginBtn.innerHTML = '<i class="fas fa-sign-in-alt" style="margin-right:6px;"></i>Login';
+      loginBtn.disabled  = false;
+      document.getElementById('loginUserId').value   = '';
+      document.getElementById('loginPassword').value = '';
+    }, 500);
+  } else {
+    errorEl.textContent = 'Invalid User ID or Password!';
+    const card = document.querySelector('.login-card');
+    if (card) {
+      card.style.animation = 'none';
+      card.offsetHeight; // reflow
+      card.style.animation = 'shake 0.5s ease';
+      setTimeout(() => card.style.animation = '', 500);
+    }
+  }
+}
+
+function logout() {
+  stopAutoFetch();
+  appState.currentUser   = null;
+  appState.rememberLogin = false;
+  saveState();
+  clearTimeout(idleTimeout);
+  showLoginScreen();
+  showToast('Logged out successfully.', 'info');
+}
+
+// Password visibility toggle
+function togglePassVis(inputId, btn) {
+  const inp = document.getElementById(inputId);
+  if (!inp) return;
+  const isPass = inp.type === 'password';
+  inp.type = isPass ? 'text' : 'password';
+  btn.innerHTML = isPass ? '<i class="fas fa-eye-slash"></i>' : '<i class="fas fa-eye"></i>';
+}
+
+// ============================================================
+// UI INITIALIZATION
+// ============================================================
+function initializeUI() {
+  const isAdmin = appState.currentUser && appState.currentUser.role === 'admin';
+  const el = id => document.getElementById(id);
+
+  el('loggedInUser').textContent  = appState.currentUser ? appState.currentUser.userId : 'Guest';
+  el('userRoleDisplay').textContent = 'Role: ' + (appState.currentUser ? appState.currentUser.role : 'N/A');
+
+  // FIX: admin-only elements — show/hide properly
+  document.querySelectorAll('.admin-only').forEach(e => {
+    e.style.display = isAdmin ? '' : 'none';
+  });
+  document.querySelectorAll('.admin-only-panel').forEach(e => {
+    e.style.display = 'none'; // panels always start hidden; navigateTo shows them
+  });
+
+  const wt = el('weeklyToggle');
+  if (wt) wt.checked = appState.weeklyVisible;
+
+  const wdr = el('weeklyDateRange');
+  if (wdr) wdr.value = appState.weeklyDateRange || getTodayWeekLabel();
+
+  const ci = el('currentDayInput');
+  if (ci) ci.value = appState.currentDay;
+  const cd = el('currentDayDisplay');
+  if (cd) cd.textContent = appState.currentDay;
+
+  toggleWeeklySection();
+  populateEntryZoneDropdown();
+  populateWeeklyTable();
+  populateHeaderRenameFields();
+  loadGSSettingsToForm();
+  populateNewUserZoneDropdown();
+  populateRecentFilterZone();
+  setDaywiseDefaultDates();
+  navigateTo('dashboard');
+}
+
+function getTodayWeekLabel() {
+  const now = new Date();
+  const d1  = new Date(now); d1.setDate(now.getDate() - now.getDay() + 1);
+  const d2  = new Date(d1);  d2.setDate(d1.getDate() + 6);
+  const fmt = d => `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
+  return `${fmt(d1)} to ${fmt(d2)}`;
+}
+
+function updateCurrentDay(val) {
+  appState.currentDay = parseInt(val) || new Date().getDate();
+  const cd = document.getElementById('currentDayDisplay');
+  if (cd) cd.textContent = appState.currentDay;
+  saveState();
+  refreshDashboard();
+}
+
+// ============================================================
+// SIDEBAR / NAVIGATION — FIX: single toggleSidebar definition
+// ============================================================
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('sidebarOverlay');
+  if (!sb) return;
+  const isOpen = sb.classList.contains('open');
+  if (isOpen) {
+    sb.classList.remove('open');
+    if (ov) ov.classList.remove('open');
+  } else {
+    sb.classList.add('open');
+    if (ov) ov.classList.add('open');
+  }
+}
+
+function closeSidebar() {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('sidebarOverlay');
+  if (sb) sb.classList.remove('open');
+  if (ov) ov.classList.remove('open');
+}
+
+function navigateTo(panelName) {
+  closeSidebar();
+  const isAdmin = appState.currentUser && appState.currentUser.role === 'admin';
+
+  // FIX: block non-admin from admin panels
+  const adminPanels = ['zoneManagement','userManagement','headerRename','settings'];
+  if (adminPanels.includes(panelName) && !isAdmin) {
+    showToast('Admin access required.', 'warning');
+    return;
+  }
+
+  document.querySelectorAll('.panel').forEach(p => p.style.display = 'none');
+  const panel = document.getElementById('panel-' + panelName);
+  if (panel) panel.style.display = 'block';
+
+  document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
+  const nl = document.getElementById('nav-' + panelName);
+  if (nl) nl.classList.add('active');
+
+  document.querySelectorAll('.mobile-bottom-nav button').forEach(b => b.classList.remove('active'));
+  const mb = document.getElementById('mb-' + panelName);
+  if (mb) mb.classList.add('active');
+
+  switch (panelName) {
+    case 'dashboard':      refreshDashboard();                                          break;
+    case 'dailyEntry':     populateEntryZoneDropdown(); refreshRecentEntries();         break;
+    case 'daywise':        refreshDaywise();                                            break;
+    case 'weeklyForecast': populateWeeklyTable();                                       break;
+    case 'reports':        refreshReports();                                            break;
+    case 'zoneManagement': refreshZoneTable();                                          break;
+    case 'userManagement': refreshUserTable(); populateNewUserZoneDropdown();           break;
+    case 'headerRename':   populateHeaderRenameFields();                                break;
+    case 'settings':       loadGSSettingsToForm();                                      break;
+    case 'shareReports':   refreshSharePreview();                                       break;
+  }
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+// ============================================================
+// ZONE DROPDOWNS
+// ============================================================
+function populateEntryZoneDropdown() {
+  const sel = document.getElementById('entryZone');
+  if (!sel) return;
+  const zone = appState.currentUser ? appState.currentUser.zone : 'All';
+  if (zone === 'All' || (appState.currentUser && appState.currentUser.role === 'admin')) {
+    sel.innerHTML = '<option value="">-- Select Zone --</option>' +
+      appState.zones.map(z => `<option value="${z.name}">${z.name} (${z.code})</option>`).join('');
+    sel.disabled = false;
+  } else {
+    sel.innerHTML = `<option value="${zone}">${zone}</option>`;
+    sel.value = zone;
+    sel.disabled = true;
+  }
+}
+
+function populateNewUserZoneDropdown() {
+  const sel = document.getElementById('newUserZone');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">-- Select Zone --</option>' +
+    appState.zones.map(z => `<option value="${z.name}">${z.name}</option>`).join('') +
+    '<option value="All">All (Admin)</option>';
+}
+
+function populateDwZoneDropdown() {
+  const sel = document.getElementById('dwZone');
+  if (!sel) return;
+  const zone = appState.currentUser ? appState.currentUser.zone : 'All';
+  sel.innerHTML = '<option value="All">All Zones</option>' +
+    appState.zones
+      .filter(z => zone === 'All' || appState.currentUser?.role === 'admin' || z.name === zone)
+      .map(z => `<option value="${z.name}">${z.name}</option>`).join('');
+}
+
+function populateRecentFilterZone() {
+  const sel = document.getElementById('recentFilterZone');
+  if (!sel) return;
+  sel.innerHTML = '<option value="All">All Zones</option>' +
+    appState.zones.map(z => `<option value="${z.name}">${z.name}</option>`).join('');
+}
+
+// ============================================================
+// ZONE MANAGEMENT
+// ============================================================
+function refreshZoneTable() {
+  const tb = document.getElementById('zonesTableBody');
+  if (!tb) return;
+  tb.innerHTML = appState.zones.map((z, i) => `
+    <tr>
+      <td><input type="text" value="${escHtml(z.name)}" onchange="updateZoneField(${i},'name',this.value)" style="border:none;background:transparent;padding:2px;width:100%;min-height:28px;font-size:.6rem;font-family:inherit;"></td>
+      <td style="font-weight:600;">${escHtml(z.code)}</td>
+      <td><input type="number" value="${z.monthlyTarget||0}" onchange="updateZoneField(${i},'monthlyTarget',parseFloat(this.value)||0)" style="width:90px;border:none;background:transparent;padding:2px;min-height:28px;font-size:.6rem;font-family:inherit;" step="any" min="0"></td>
+      <td><button class="btn btn-danger btn-sm" style="padding:2px 6px;min-height:24px;" onclick="deleteZone(${i})"><i class="fas fa-trash"></i></button></td>
+    </tr>`).join('');
+}
+
+function updateZoneField(index, field, value) {
+  appState.zones[index][field] = value;
+  saveState();
+  populateEntryZoneDropdown(); populateWeeklyTable();
+  showToast('Zone updated.', 'info');
+  if (appState.autoSync) syncToGoogleSheets();
+}
+
+function addZone() {
+  const name   = document.getElementById('newZoneName').value.trim();
+  const code   = document.getElementById('newZoneCode').value.trim().toUpperCase();
+  const target = parseFloat(document.getElementById('newZoneTarget').value) || 0;
+  if (!name || !code) { showToast('Fill zone name & code.', 'warning'); return; }
+  if (appState.zones.find(z => z.name.toLowerCase() === name.toLowerCase())) { showToast('Zone already exists!', 'warning'); return; }
+  appState.zones.push({name, code, monthlyTarget: target});
+  saveState();
+  document.getElementById('newZoneName').value  = '';
+  document.getElementById('newZoneCode').value  = '';
+  document.getElementById('newZoneTarget').value = '';
+  refreshZoneTable(); populateEntryZoneDropdown(); populateWeeklyTable(); populateDwZoneDropdown(); populateNewUserZoneDropdown();
+  showToast(`Zone "${name}" added!`, 'success');
+  if (appState.autoSync) syncToGoogleSheets();
+}
+
+function deleteZone(index) {
+  if (confirm(`Delete zone "${appState.zones[index].name}"?`)) {
+    appState.zones.splice(index, 1);
+    saveState();
+    refreshZoneTable(); populateEntryZoneDropdown(); populateWeeklyTable();
+    showToast('Zone deleted.', 'info');
+    if (appState.autoSync) syncToGoogleSheets();
+  }
+}
+
+// ============================================================
+// USER MANAGEMENT
+// ============================================================
+function refreshUserTable() {
+  const tb = document.getElementById('usersTableBody');
+  if (!tb) return;
+  tb.innerHTML = appState.users.map((u, i) => `
+    <tr>
+      <td style="font-weight:600;">${escHtml(u.userId)}</td>
+      <td>${escHtml(u.zone)}</td>
+      <td><span class="badge ${u.role==='admin'?'badge-danger':'badge-info'}">${u.role}</span></td>
+      <td><span class="badge ${u.status==='active'?'badge-success':'badge-warning'}">${u.status}</span></td>
+      <td style="display:flex;gap:3px;flex-wrap:wrap;">
+        <button class="btn btn-sm" style="padding:2px 6px;min-height:22px;font-size:.5rem;background:${u.status==='active'?'#f59e0b':'#059669'};color:${u.status==='active'?'#111':'#fff'};" onclick="toggleUserStatus(${i})">${u.status==='active'?'Deact':'Act'}</button>
+        <button class="btn btn-sm" style="padding:2px 6px;min-height:22px;font-size:.5rem;background:#6366f1;color:#fff;" onclick="resetUserPass(${i})"><i class="fas fa-key"></i></button>
+        <button class="btn btn-danger btn-sm" style="padding:2px 6px;min-height:22px;font-size:.5rem;" onclick="deleteUser(${i})"><i class="fas fa-trash"></i></button>
+      </td>
+    </tr>`).join('');
+}
+
+function addUser() {
+  const userId   = document.getElementById('newUserId').value.trim();
+  const password = document.getElementById('newUserPass').value.trim();
+  const zone     = document.getElementById('newUserZone').value;
+  const role     = document.getElementById('newUserRole').value || (zone === 'All' ? 'admin' : 'zonal');
+  if (!userId || !password || !zone) { showToast('Fill all fields.', 'warning'); return; }
+  if (password.length < 4) { showToast('Password must be at least 4 characters.', 'warning'); return; }
+  if (appState.users.find(u => u.userId === userId)) { showToast('User ID already exists!', 'warning'); return; }
+  const newUser = {userId, password, zone, role, status:'active'};
+  appState.users.push(newUser);
+  saveState();
+  document.getElementById('newUserId').value   = '';
+  document.getElementById('newUserPass').value = '';
+  document.getElementById('newUserZone').value = '';
+  refreshUserTable();
+  showToast(`User "${userId}" created! Syncing...`, 'success');
+  syncToGoogleSheets()
+    .then(() => showToast('User synced to Cloud!', 'success'))
+    .catch(e  => showToast('Sync failed: ' + e.message, 'warning'));
+}
+
+function toggleUserStatus(index) {
+  appState.users[index].status = appState.users[index].status === 'active' ? 'inactive' : 'active';
+  saveState(); refreshUserTable();
+  showToast('Status updated.', 'info');
+  if (appState.autoSync) syncToGoogleSheets();
+}
+
+function resetUserPass(index) {
+  const newPass = prompt(`New password for "${appState.users[index].userId}":`);
+  if (!newPass || newPass.trim().length < 4) { showToast('Password too short (min 4 chars).', 'warning'); return; }
+  appState.users[index].password = newPass.trim();
+  saveState(); refreshUserTable();
+  showToast('Password updated!', 'success');
+  if (appState.autoSync) syncToGoogleSheets();
+}
+
+function deleteUser(index) {
+  if (appState.users[index].role === 'admin' && appState.users.filter(u => u.role === 'admin').length <= 1) {
+    showToast('Cannot delete the last admin!', 'warning'); return;
+  }
+  if (confirm(`Delete user "${appState.users[index].userId}"?`)) {
+    appState.users.splice(index, 1);
+    saveState(); refreshUserTable();
+    showToast('User deleted.', 'info');
+    syncToGoogleSheets().then(() => showToast('Synced!', 'success')).catch(() => {});
+  }
+}
+
+// ============================================================
+// HEADERS
+// ============================================================
+function populateHeaderRenameFields() {
+  const c = document.getElementById('headerRenameFields');
+  if (!c) return;
+  c.innerHTML = Object.keys(appState.headers).map(k => `
+    <div>
+      <label>${k.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase())}</label>
+      <input type="text" value="${escHtml(appState.headers[k])}" data-header-key="${k}" onchange="updateHeaderField('${k}',this.value)" style="min-height:34px;">
+    </div>`).join('');
+}
+function updateHeaderField(key, value) { appState.headers[key] = value; saveState(); }
+function saveHeaderRenames() { saveState(); showToast('Headers saved!', 'success'); }
+
+// ============================================================
+// DAILY ENTRY
+// ============================================================
+function saveDailyEntry() {
+  const zone               = document.getElementById('entryZone').value;
+  const date               = document.getElementById('entryDate').value;
+  const monthlyTarget      = parseFloat(document.getElementById('entryMonthlyTarget').value)      || 0;
+  const salesForecast      = parseFloat(document.getElementById('entrySalesForecast').value)      || 0;
+  const sales              = parseFloat(document.getElementById('entrySales').value)              || 0;
+  const collectionForecast = parseFloat(document.getElementById('entryCollectionForecast').value) || 0;
+  const collection         = parseFloat(document.getElementById('entryCollection').value)         || 0;
+  const remarks            = document.getElementById('entryRemarks').value || '';
+
+  if (!zone || !date) { showToast('Select zone & date.', 'warning'); return; }
+
+  // Update zone monthly target if provided
+  const zoneObj = appState.zones.find(z => z.name === zone);
+  if (zoneObj && monthlyTarget > 0) zoneObj.monthlyTarget = monthlyTarget;
+
+  const entry = {
+    id:               Date.now(),
+    zone, date,
+    monthlyTarget:    monthlyTarget || (zoneObj ? zoneObj.monthlyTarget : 0),
+    salesForecast, sales, collectionForecast, collection, remarks,
+    userId:           appState.currentUser ? appState.currentUser.userId : 'unknown',
+    timestamp:        new Date().toISOString(),
+  };
+
+  // Replace existing entry for same zone+date, or add new
+  const idx = appState.dailyEntries.findIndex(e => e.zone === zone && e.date === date);
+  if (idx >= 0) appState.dailyEntries[idx] = entry;
+  else          appState.dailyEntries.push(entry);
+
+  saveState();
+  // FIX: keep date, only clear numeric/text fields
+  clearEntryFormFields();
+  refreshRecentEntries();
+  refreshDashboard();
+  showToast('Entry saved!', 'success');
+
+  if (appState.autoSync && appState.gsSettings.apiKey) {
+    setSyncStatus('syncing', 'Syncing to Cloud...');
+    document.getElementById('entryStatus').textContent = 'Syncing to Cloud...';
+    syncToGoogleSheets()
+      .then(() => {
+        document.getElementById('entryStatus').textContent = ' Saved & synced to Cloud!';
+        setSyncStatus('synced', 'Synced to Cloud ');
+      })
+      .catch(err => {
+        document.getElementById('entryStatus').textContent = ' Saved locally (sync failed: ' + err.message + ')';
+        setSyncStatus('error', 'Sync failed – data saved locally');
+      });
+  } else {
+    document.getElementById('entryStatus').textContent = ' Saved locally';
+  }
+}
+
+// FIX: clearEntryFormFields keeps the date; clearEntryForm resets everything
+function clearEntryFormFields() {
+  ['entrySalesForecast','entrySales','entryCollectionForecast','entryCollection','entryMonthlyTarget','entryRemarks']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('entryStatus').textContent = '';
+}
+function clearEntryForm() {
+  clearEntryFormFields();
+  // Also reset zone and date
+  const ez = document.getElementById('entryZone');
+  if (ez && !ez.disabled) ez.value = '';
+  document.getElementById('entryDate').value = new Date().toISOString().split('T')[0];
+}
+
+function refreshRecentEntries() {
+  const tb = document.getElementById('recentEntriesBody');
+  if (!tb) return;
+  const userZone   = appState.currentUser ? appState.currentUser.zone : 'All';
+  const filterZone = document.getElementById('recentFilterZone')?.value || 'All';
+  let entries = [...appState.dailyEntries];
+  if (userZone !== 'All' && appState.currentUser?.role !== 'admin')
+    entries = entries.filter(e => e.zone === userZone);
+  if (filterZone !== 'All')
+    entries = entries.filter(e => e.zone === filterZone);
+  entries = entries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 80);
+  if (!entries.length) {
+    tb.innerHTML = '<tr><td colspan="9" style="padding:12px;text-align:center;color:#94a3b8;">No entries yet</td></tr>';
+    return;
+  }
+  tb.innerHTML = entries.map(e => `
+    <tr>
+      <td>${e.date}</td>
+      <td style="font-weight:600;">${escHtml(e.zone)}</td>
+      <td>${(e.monthlyTarget||0).toFixed(1)}</td>
+      <td>${(e.salesForecast||0).toFixed(1)}</td>
+      <td style="font-weight:600;">${(e.sales||0).toFixed(1)}</td>
+      <td>${formatBDTShort(e.collectionForecast)}</td>
+      <td style="font-weight:600;">${formatBDTShort(e.collection)}</td>
+      <td>${escHtml(e.userId||'—')}</td>
+      <td><button class="btn btn-danger btn-sm" style="padding:1px 5px;min-height:20px;font-size:.5rem;" onclick="deleteEntry(${e.id})"><i class="fas fa-trash"></i></button></td>
+    </tr>`).join('');
+}
+
+function deleteEntry(id) {
+  if (confirm('Delete this entry?')) {
+    appState.dailyEntries = appState.dailyEntries.filter(e => e.id !== id);
+    saveState(); refreshRecentEntries(); refreshDashboard();
+    showToast('Entry deleted.', 'info');
+    if (appState.autoSync) syncToGoogleSheets();
+  }
+}
+
+// ============================================================
+// WEEKLY FORECAST
+// ============================================================
+function toggleWeeklySection() {
+  appState.weeklyVisible = document.getElementById('weeklyToggle').checked;
+  document.getElementById('weeklySection').style.display = appState.weeklyVisible ? '' : 'none';
+  saveState();
+}
+
+function populateWeeklyTable() {
+  const tb = document.getElementById('weeklyTableBody');
+  if (!tb) return;
+  const dateRange = document.getElementById('weeklyDateRange')?.value || appState.weeklyDateRange || getTodayWeekLabel();
+  const userZone  = appState.currentUser ? appState.currentUser.zone : 'All';
+  let zones = appState.zones;
+  if (userZone !== 'All' && appState.currentUser?.role !== 'admin')
+    zones = appState.zones.filter(z => z.name === userZone);
+  tb.innerHTML = zones.map(z => {
+    const wf = appState.weeklyForecasts.find(w => w.zone === z.name && w.dateRange === dateRange) || {salesForecast:0, collectionForecast:0};
+    return `<tr>
+      <td style="font-weight:600;">${escHtml(z.name)}</td>
+      <td><input type="number" value="${wf.salesForecast||0}" data-zone="${escHtml(z.name)}" data-field="salesForecast" class="weekly-input" step="any" min="0" style="width:100%;min-height:28px;font-size:.6rem;font-family:inherit;"></td>
+      <td><input type="number" value="${wf.collectionForecast||0}" data-zone="${escHtml(z.name)}" data-field="collectionForecast" class="weekly-input" step="any" min="0" style="width:100%;min-height:28px;font-size:.6rem;font-family:inherit;"></td>
+      <td style="text-align:center;"><span class="badge badge-info">Pending</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function saveWeeklyForecast() {
+  const dateRange = document.getElementById('weeklyDateRange').value || getTodayWeekLabel();
+  appState.weeklyDateRange = dateRange;
+  document.querySelectorAll('.weekly-input').forEach(inp => {
+    const zone  = inp.dataset.zone;
+    const field = inp.dataset.field;
+    const value = parseFloat(inp.value) || 0;
+    let wf = appState.weeklyForecasts.find(w => w.zone === zone && w.dateRange === dateRange);
+    if (!wf) {
+      wf = {zone, dateRange, salesForecast:0, collectionForecast:0, id: Date.now() + Math.random()};
+      appState.weeklyForecasts.push(wf);
+    }
+    wf[field] = value;
+  });
+  saveState(); populateWeeklyTable();
+  showToast('Weekly forecast saved!', 'success');
+  if (appState.autoSync)
+    syncToGoogleSheets().then(() => showToast('Weekly synced!', 'success')).catch(() => {});
+}
+
+// ============================================================
+// AGGREGATION
+// ============================================================
+// appState.dashDateFilter = '' means full month, otherwise 'YYYY-MM-DD'
+function getZoneAggregatedData(filterZone, filterDate) {
+  const zoneData = {};
+  const userZone = appState.currentUser ? appState.currentUser.zone : 'All';
+  let zones = appState.zones;
+  if (userZone !== 'All' && appState.currentUser?.role !== 'admin')
+    zones = appState.zones.filter(z => z.name === userZone);
+  if (filterZone && filterZone !== 'All')
+    zones = zones.filter(z => z.name === filterZone);
+  zones.forEach(z => {
+    zoneData[z.name] = {monthlyTarget:z.monthlyTarget||0, totalSalesForecast:0, totalSales:0, totalCollectionForecast:0, totalCollection:0, count:0};
+  });
+  // Use active date filter from appState if not explicitly passed
+  const activeDate = filterDate !== undefined ? filterDate : (appState.dashDateFilter || '');
+  appState.dailyEntries.forEach(e => {
+    if (activeDate && e.date !== activeDate) return; // date filter
+    if (zoneData[e.zone]) {
+      zoneData[e.zone].totalSalesForecast      += e.salesForecast      || 0;
+      zoneData[e.zone].totalSales              += e.sales              || 0;
+      zoneData[e.zone].totalCollectionForecast += e.collectionForecast || 0;
+      zoneData[e.zone].totalCollection         += e.collection         || 0;
+      zoneData[e.zone].count++;
+      if ((e.monthlyTarget||0) > 0 && zoneData[e.zone].monthlyTarget === 0)
+        zoneData[e.zone].monthlyTarget = e.monthlyTarget;
+    }
+  });
+  return zoneData;
+}
+
+// ============================================================
+// DASHBOARD DATE FILTER
+// ============================================================
+function applyDashDateFilter() {
+  const val = document.getElementById('dashDateFilter')?.value || '';
+  appState.dashDateFilter = val;
+  // Update badge
+  const badge = document.getElementById('dashFilterBadge');
+  const badgeText = document.getElementById('dashFilterBadgeText');
+  if (val) {
+    const d = new Date(val + 'T00:00:00');
+    const label = d.toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'});
+    if (badge) badge.style.display = 'flex';
+    if (badgeText) badgeText.textContent = 'Showing: ' + label;
+  } else {
+    if (badge) badge.style.display = 'none';
+  }
+  refreshDashboard();
+}
+
+function clearDashDateFilter() {
+  appState.dashDateFilter = '';
+  const inp = document.getElementById('dashDateFilter');
+  if (inp) inp.value = '';
+  const badge = document.getElementById('dashFilterBadge');
+  if (badge) badge.style.display = 'none';
+  refreshDashboard();
+}
+
+function setDashDateToday() {
+  const today = new Date().toISOString().split('T')[0];
+  const inp = document.getElementById('dashDateFilter');
+  if (inp) inp.value = today;
+  applyDashDateFilter();
+}
+
+// ============================================================
+// DASHBOARD
+// ============================================================
+function refreshDashboard() {
+  // Update summary title to show filter state
+  const cd = document.getElementById('currentDayDisplay');
+  const activeDate = appState.dashDateFilter || '';
+  if (cd) {
+    if (activeDate) {
+      const d = new Date(activeDate + 'T00:00:00');
+      cd.textContent = d.toLocaleDateString('en-GB', {day:'2-digit', month:'short'});
+    } else {
+      cd.textContent = appState.currentDay || new Date().getDate();
+    }
+  }
+  refreshSummaryTable();
+  refreshKPIs();
+  refreshCharts();
+}
+
+function refreshSummaryTable() {
+  const tb = document.getElementById('summaryTableBody');
+  const tf = document.getElementById('summaryTableFoot');
+  if (!tb || !tf) return;
+  const zd     = getZoneAggregatedData();
+  const dayNum = appState.currentDay || new Date().getDate();
+  let tMT=0, tSF=0, tS=0, tTT=0, tTC=0, tCF=0, tC=0;
+  tb.innerHTML = Object.keys(zd).map(zName => {
+    const d     = zd[zName];
+    const achvS = d.totalSalesForecast > 0 ? (d.totalSales / d.totalSalesForecast) * 100 : 0;
+    const tt    = (d.monthlyTarget / 30) * dayNum;
+    const tc    = d.totalSales;
+    const achvT = tt > 0 ? (tc / tt) * 100 : 0;
+    const achvC = d.totalCollectionForecast > 0 ? (d.totalCollection / d.totalCollectionForecast) * 100 : 0;
+    tMT += d.monthlyTarget; tSF += d.totalSalesForecast; tS += d.totalSales;
+    tTT += tt; tTC += tc; tCF += d.totalCollectionForecast; tC += d.totalCollection;
+    return `<tr>
+      <td style="font-weight:600;">${escHtml(zName)}</td>
+      <td>${d.monthlyTarget.toFixed(1)}</td>
+      <td>${d.totalSalesForecast.toFixed(1)}</td>
+      <td style="font-weight:600;">${d.totalSales.toFixed(1)}</td>
+      <td><span class="badge ${achvS>=100?'badge-success':achvS>=50?'badge-warning':'badge-danger'}">${achvS.toFixed(1)}%</span></td>
+      <td>${tt.toFixed(1)}</td>
+      <td>${tc.toFixed(1)}</td>
+      <td><span class="badge ${achvT>=100?'badge-success':achvT>=50?'badge-warning':'badge-danger'}">${achvT.toFixed(1)}%</span></td>
+      <td>${formatBDTShort(d.totalCollectionForecast)}</td>
+      <td style="font-weight:600;">${formatBDTShort(d.totalCollection)}</td>
+      <td><span class="badge ${achvC>=100?'badge-success':achvC>=50?'badge-warning':'badge-danger'}">${achvC.toFixed(1)}%</span></td>
+    </tr>`;
+  }).join('');
+  const tAS = tSF>0?(tS/tSF)*100:0, tAT = tTT>0?(tTC/tTT)*100:0, tAC = tCF>0?(tC/tCF)*100:0;
+  tf.innerHTML = `<tr>
+    <td><strong>TOTAL</strong></td>
+    <td><strong>${tMT.toFixed(1)}</strong></td>
+    <td><strong>${tSF.toFixed(1)}</strong></td>
+    <td><strong>${tS.toFixed(1)}</strong></td>
+    <td><span class="badge ${tAS>=100?'badge-success':tAS>=50?'badge-warning':'badge-danger'}">${tAS.toFixed(1)}%</span></td>
+    <td><strong>${tTT.toFixed(1)}</strong></td>
+    <td><strong>${tTC.toFixed(1)}</strong></td>
+    <td><span class="badge ${tAT>=100?'badge-success':tAT>=50?'badge-warning':'badge-danger'}">${tAT.toFixed(1)}%</span></td>
+    <td><strong>${formatBDTShort(tCF)}</strong></td>
+    <td><strong>${formatBDTShort(tC)}</strong></td>
+    <td><span class="badge ${tAC>=100?'badge-success':tAC>=50?'badge-warning':'badge-danger'}">${tAC.toFixed(1)}%</span></td>
+  </tr>`;
+}
+
+function refreshKPIs() {
+  const zd = getZoneAggregatedData();
+  let tT=0, tS=0, tC=0, tSF=0, tCF=0;
+  Object.values(zd).forEach(d => { tT+=d.monthlyTarget; tS+=d.totalSales; tC+=d.totalCollection; tSF+=d.totalSalesForecast; tCF+=d.totalCollectionForecast; });
+  const achv     = tSF > 0 ? (tS / tSF) * 100 : 0;
+  const collAchv = tCF > 0 ? (tC / tCF) * 100 : 0;
+  document.getElementById('kpiMonthlyTarget').textContent = tT.toFixed(1) + ' MT';
+  document.getElementById('kpiTotalSales').textContent    = tS.toFixed(1) + ' MT';
+  document.getElementById('kpiAchievement').textContent   = achv.toFixed(1) + '%';
+  document.getElementById('kpiCollection').textContent    = formatBDTShort(tC);
+  document.getElementById('kpiCollAchv').textContent      = collAchv.toFixed(1) + '%';
+}
+
+function refreshCharts() {
+  const zd    = getZoneAggregatedData();
+  const zones = Object.keys(zd);
+  const sData = zones.map(z => zd[z].totalSales);
+  const cData = zones.map(z => zd[z].totalCollection / 10000000);
+  const aData = zones.map(z => zd[z].totalSalesForecast > 0 ? (zd[z].totalSales / zd[z].totalSalesForecast) * 100 : 0);
+  const tData = zones.map(z => zd[z].monthlyTarget);
+  createOrUpdateChart('chartSalesBar',     'bar',  zones, sData, 'Sales (M.T)',       '#1a56db');
+  createOrUpdateChart('chartCollectionBar','bar',  zones, cData, 'Collection (BDT Cr)','#047857');
+  createOrUpdateChart('chartAchievement',  'bar',  zones, aData, 'Achievement %',     '#f59e0b');
+  createOrUpdateChart('chartTrend',        'line', zones, sData, 'Sales',             '#dc2626', tData, 'Target');
+}
+
+function createOrUpdateChart(id, type, labels, data, label, color, data2, label2) {
+  const canvas = document.getElementById(id);
+  if (!canvas) return;
+  if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
+  const ctx = canvas.getContext('2d');
+  const datasets = [{
+    label, data,
+    backgroundColor: type === 'bar' ? color + '99' : color + '33',
+    borderColor: color,
+    borderWidth: 2,
+    borderRadius: type === 'bar' ? 4 : 0,
+    fill: type === 'line',
+    tension: .4,
+    pointRadius: 2,
+    pointHoverRadius: 5,
+  }];
+  if (data2 && label2) datasets.push({
+    label: label2, data: data2,
+    backgroundColor: '#94a3b844',
+    borderColor: '#94a3b8',
+    borderWidth: 2,
+    fill: false,
+    tension: .4,
+    pointRadius: 2,
+    borderDash: [6, 3],
+  });
+  chartInstances[id] = new Chart(ctx, {
+    type,
+    data: {labels, datasets},
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {legend: {position:'bottom', labels:{usePointStyle:true, padding:10, font:{size:8}}}},
+      scales: {
+        y: {beginAtZero:true, grid:{color:'#f1f5f9'}, ticks:{font:{size:8}}},
+        x: {grid:{display:false}, ticks:{font:{size:8}}},
+      },
+    },
+  });
+}
+
+// ============================================================
+// DAY-WISE REPORT
+// ============================================================
+function setDaywiseDefaultDates() {
+  const now = new Date();
+  const y   = now.getFullYear();
+  const m   = String(now.getMonth() + 1).padStart(2, '0');
+  const dwFrom = document.getElementById('dwFrom');
+  const dwTo   = document.getElementById('dwTo');
+  if (dwFrom) dwFrom.value = `${y}-${m}-01`;
+  if (dwTo)   dwTo.value   = `${y}-${m}-${String(now.getDate()).padStart(2, '0')}`;
+  populateDwZoneDropdown();
+}
+
+function refreshDaywise() {
+  const fromVal = document.getElementById('dwFrom')?.value;
+  const toVal   = document.getElementById('dwTo')?.value;
+  const zone    = document.getElementById('dwZone')?.value || 'All';
+  if (!fromVal || !toVal) { showToast('Select date range.', 'warning'); return; }
+  const from = new Date(fromVal), to = new Date(toVal);
+  if (from > to) { showToast('From date must be before To date.', 'warning'); return; }
+
+  const userZone = appState.currentUser ? appState.currentUser.zone : 'All';
+  let entries = [...appState.dailyEntries];
+  if (userZone !== 'All' && appState.currentUser?.role !== 'admin')
+    entries = entries.filter(e => e.zone === userZone);
+  if (zone !== 'All') entries = entries.filter(e => e.zone === zone);
+  entries = entries.filter(e => { const d = new Date(e.date); return d >= from && d <= to; });
+  entries = entries.sort((a, b) => a.date.localeCompare(b.date) || (a.zone < b.zone ? -1 : 1));
+
+  // Build day-aggregated map
+  const dayMap = {};
+  entries.forEach(e => {
+    const key = e.date + (zone === 'All' ? '|' + e.zone : '');
+    if (!dayMap[key]) dayMap[key] = {date:e.date, zone:e.zone, monthlyTarget:e.monthlyTarget||0, salesForecast:0, sales:0, collectionForecast:0, collection:0, count:0};
+    const d = dayMap[key];
+    d.salesForecast      += e.salesForecast      || 0;
+    d.sales              += e.sales              || 0;
+    d.collectionForecast += e.collectionForecast || 0;
+    d.collection         += e.collection         || 0;
+    d.count++;
+    if ((e.monthlyTarget||0) > d.monthlyTarget) d.monthlyTarget = e.monthlyTarget;
+  });
+
+  const rows        = Object.values(dayMap).sort((a,b) => a.date.localeCompare(b.date) || (a.zone < b.zone ? -1 : 1));
+  const uniqueDates = [...new Set(rows.map(r => r.date))];
+
+  // KPIs
+  let tDayTarget=0, tSales=0, tSalesFcst=0, tColl=0;
+  rows.forEach(r => { const dt=(r.monthlyTarget||0)/30; tDayTarget+=dt; tSales+=r.sales; tSalesFcst+=r.salesForecast; tColl+=r.collection; });
+  document.getElementById('dwKpiDays').textContent   = uniqueDates.length;
+  document.getElementById('dwKpiTarget').textContent = tDayTarget.toFixed(1);
+  document.getElementById('dwKpiSales').textContent  = tSales.toFixed(1);
+  const achv = tSalesFcst > 0 ? (tSales / tSalesFcst) * 100 : 0;
+  document.getElementById('dwKpiAchv').textContent   = achv.toFixed(1) + '%';
+  document.getElementById('dwKpiColl').textContent   = formatBDTShort(tColl);
+
+  // Charts
+  if (zone === 'All') {
+    const dateAgg = {};
+    rows.forEach(r => {
+      if (!dateAgg[r.date]) dateAgg[r.date] = {sales:0, salesFcst:0, collection:0, collFcst:0, dayTarget:0};
+      dateAgg[r.date].sales      += r.sales;
+      dateAgg[r.date].salesFcst  += r.salesForecast;
+      dateAgg[r.date].collection += r.collection;
+      dateAgg[r.date].collFcst   += r.collectionForecast;
+      dateAgg[r.date].dayTarget  += (r.monthlyTarget||0) / 30;
+    });
+    const chartDates = Object.keys(dateAgg).sort();
+    buildDaywiseCharts(
+      chartDates,
+      chartDates.map(d => dateAgg[d].sales),
+      chartDates.map(d => dateAgg[d].dayTarget),
+      chartDates.map(d => dateAgg[d].collection),
+      chartDates.map(d => dateAgg[d].collFcst)
+    );
+  } else {
+    buildDaywiseCharts(
+      rows.map(r => r.date),
+      rows.map(r => r.sales),
+      rows.map(r => (r.monthlyTarget||0) / 30),
+      rows.map(r => r.collection),
+      rows.map(r => r.collectionForecast)
+    );
+  }
+
+  // Table
+  const tb = document.getElementById('daywiseTableBody');
+  const tf = document.getElementById('daywiseTableFoot');
+  let totDT=0, totSF=0, totS=0, totCF=0, totC=0;
+  tb.innerHTML = rows.map(r => {
+    const dayTarget = (r.monthlyTarget||0) / 30;
+    const vsFcst    = r.salesForecast > 0 ? (r.sales / r.salesForecast) * 100 : 0;
+    const vsDayTgt  = dayTarget > 0 ? (r.sales / dayTarget) * 100 : 0;
+    const collAchv  = r.collectionForecast > 0 ? (r.collection / r.collectionForecast) * 100 : 0;
+    const status    = r.sales >= dayTarget && dayTarget > 0 ? '<span style="color:#059669;font-weight:700;">On Target</span>' : r.sales > 0 ? '<span style="color:#d97706;font-weight:700;">Below</span>' : '—';
+    totDT += dayTarget; totSF += r.salesForecast; totS += r.sales; totCF += r.collectionForecast; totC += r.collection;
+    const rowBg = r.sales >= dayTarget && dayTarget > 0 ? 'dw-above' : r.sales > 0 ? 'dw-below' : '';
+    return `<tr class="${rowBg}">
+      <td>${r.date}</td>
+      <td style="font-weight:600;">${escHtml(r.zone)}</td>
+      <td>${dayTarget.toFixed(2)}</td>
+      <td>${r.salesForecast.toFixed(1)}</td>
+      <td style="font-weight:600;">${r.sales.toFixed(1)}</td>
+      <td><span class="badge ${vsFcst>=100?'badge-success':vsFcst>=50?'badge-warning':'badge-danger'}">${vsFcst.toFixed(1)}%</span></td>
+      <td><span class="badge ${vsDayTgt>=100?'badge-success':vsDayTgt>=50?'badge-warning':'badge-danger'}">${vsDayTgt.toFixed(1)}%</span></td>
+      <td>${formatBDTShort(r.collectionForecast)}</td>
+      <td style="font-weight:600;">${formatBDTShort(r.collection)}</td>
+      <td><span class="badge ${collAchv>=100?'badge-success':collAchv>=50?'badge-warning':'badge-danger'}">${collAchv.toFixed(1)}%</span></td>
+      <td style="white-space:nowrap;">${status}</td>
+    </tr>`;
+  }).join('');
+  if (!rows.length) tb.innerHTML = '<tr><td colspan="11" style="padding:14px;text-align:center;color:#94a3b8;">No entries in selected range</td></tr>';
+
+  const totFcstAchv = totSF>0?(totS/totSF)*100:0;
+  const totDTAchv   = totDT>0?(totS/totDT)*100:0;
+  const totCAchv    = totCF>0?(totC/totCF)*100:0;
+  tf.innerHTML = `<tr>
+    <td colspan="2"><strong>TOTAL</strong></td>
+    <td><strong>${totDT.toFixed(2)}</strong></td>
+    <td><strong>${totSF.toFixed(1)}</strong></td>
+    <td><strong>${totS.toFixed(1)}</strong></td>
+    <td><span class="badge ${totFcstAchv>=100?'badge-success':totFcstAchv>=50?'badge-warning':'badge-danger'}">${totFcstAchv.toFixed(1)}%</span></td>
+    <td><span class="badge ${totDTAchv>=100?'badge-success':totDTAchv>=50?'badge-warning':'badge-danger'}">${totDTAchv.toFixed(1)}%</span></td>
+    <td><strong>${formatBDTShort(totCF)}</strong></td>
+    <td><strong>${formatBDTShort(totC)}</strong></td>
+    <td><span class="badge ${totCAchv>=100?'badge-success':totCAchv>=50?'badge-warning':'badge-danger'}">${totCAchv.toFixed(1)}%</span></td>
+    <td></td>
+  </tr>`;
+}
+
+function buildDaywiseCharts(dates, sales, targets, coll, collFcst) {
+  ['daywiseChart','daywiseCollChart'].forEach(id => {
+    if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
+  });
+  const c1 = document.getElementById('daywiseChart');
+  const c2 = document.getElementById('daywiseCollChart');
+  const commonOpts = {
+    responsive: true, maintainAspectRatio: true,
+    plugins: {legend:{position:'bottom', labels:{usePointStyle:true, padding:10, font:{size:8}}}},
+    scales: {
+      y: {beginAtZero:true, grid:{color:'#f1f5f9'}, ticks:{font:{size:8}}},
+      x: {grid:{display:false}, ticks:{font:{size:8}, maxRotation:45}},
+    },
+  };
+  if (c1) chartInstances['daywiseChart'] = new Chart(c1.getContext('2d'), {
+    type: 'bar',
+    data: {labels: dates, datasets: [
+      {label:'Actual Sales (MT)', data:sales, backgroundColor:'#1a56db99', borderColor:'#1a56db', borderWidth:2, borderRadius:4},
+      {label:'Daily Target (MT)', data:targets, type:'line', borderColor:'#dc2626', borderWidth:2, fill:false, tension:.4, pointRadius:3, borderDash:[5,4]},
+    ]},
+    options: commonOpts,
+  });
+  if (c2) chartInstances['daywiseCollChart'] = new Chart(c2.getContext('2d'), {
+    type: 'bar',
+    data: {labels: dates, datasets: [
+      {label:'Actual Collection (BDT Lac)', data:coll.map(v=>v/100000), backgroundColor:'#04785799', borderColor:'#047857', borderWidth:2, borderRadius:4},
+      {label:'Coll Forecast (BDT Lac)', data:collFcst.map(v=>v/100000), type:'line', borderColor:'#f59e0b', borderWidth:2, fill:false, tension:.4, pointRadius:3, borderDash:[5,4]},
+    ]},
+    options: commonOpts,
+  });
+}
+
+// ============================================================
+// REPORTS — FIX: radar chart uses correct Chart.js 4.x config
+// ============================================================
+function refreshReports() {
+  const zd    = getZoneAggregatedData();
+  const zones = Object.keys(zd);
+  const aData = zones.map(z => zd[z].totalSalesForecast > 0 ? (zd[z].totalSales / zd[z].totalSalesForecast) * 100 : 0);
+  const sData = zones.map(z => zd[z].totalSales);
+  const cData = zones.map(z => zd[z].totalCollection / 10000000);
+  const tData = zones.map(z => zd[z].monthlyTarget);
+
+  createOrUpdateChart('gaugeChart',     'bar',  zones, aData, 'Achievement %',       '#f59e0b');
+  createOrUpdateChart('heatmapChart',   'bar',  zones, cData, 'Collection (BDT Cr)', '#ef4444');
+  createOrUpdateChart('dailyTrendChart','line', zones, sData, 'Sales (M.T)',         '#3b82f6', tData, 'Target');
+
+  // FIX: radar chart — Chart.js 4.x uses 'r' scale, not 'y'/'x'
+  const rc = document.getElementById('radarChart');
+  if (rc) {
+    if (chartInstances['radarChart']) { chartInstances['radarChart'].destroy(); delete chartInstances['radarChart']; }
+    chartInstances['radarChart'] = new Chart(rc.getContext('2d'), {
+      type: 'radar',
+      data: {
+        labels: zones,
+        datasets: [
+          {label:'Sales (MT)', data:sData, backgroundColor:'rgba(59,130,246,.2)', borderColor:'#3b82f6', borderWidth:2, pointRadius:3},
+          {label:'Target (MT)', data:tData, backgroundColor:'rgba(249,115,22,.15)', borderColor:'#f97316', borderWidth:2, pointRadius:3, borderDash:[4,3]},
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: true,
+        plugins: {legend:{position:'bottom', labels:{usePointStyle:true, padding:10, font:{size:8}}}},
+        scales: {
+          r: {
+            beginAtZero: true,
+            ticks: {font:{size:7}, backdropColor:'transparent'},
+            grid: {color:'#e2e8f0'},
+            pointLabels: {font:{size:8}},
+          },
+        },
+      },
+    });
+  }
+
+  // Full report table
+  const rd = document.getElementById('fullReportTable');
+  if (rd) {
+    let rows = '', tMT=0, tSF=0, tS=0, tCF=0, tC=0;
+    Object.keys(zd).forEach(zName => {
+      const d = zd[zName];
+      const aS = d.totalSalesForecast>0?(d.totalSales/d.totalSalesForecast)*100:0;
+      const aC = d.totalCollectionForecast>0?(d.totalCollection/d.totalCollectionForecast)*100:0;
+      tMT+=d.monthlyTarget; tSF+=d.totalSalesForecast; tS+=d.totalSales; tCF+=d.totalCollectionForecast; tC+=d.totalCollection;
+      rows += `<tr><td style="font-weight:600;">${escHtml(zName)}</td><td>${d.monthlyTarget.toFixed(1)}</td><td>${d.totalSalesForecast.toFixed(1)}</td><td>${d.totalSales.toFixed(1)}</td><td><span class="badge ${aS>=100?'badge-success':aS>=50?'badge-warning':'badge-danger'}">${aS.toFixed(1)}%</span></td><td>${formatBDTShort(d.totalCollectionForecast)}</td><td>${formatBDTShort(d.totalCollection)}</td><td><span class="badge ${aC>=100?'badge-success':aC>=50?'badge-warning':'badge-danger'}">${aC.toFixed(1)}%</span></td></tr>`;
+    });
+    const tAS=tSF>0?(tS/tSF)*100:0, tAC=tCF>0?(tC/tCF)*100:0;
+    rd.innerHTML = `<div class="table-responsive"><table><thead><tr><th>Zone</th><th>Monthly Target(MT)</th><th>Sales Fcst(MT)</th><th>Actual Sales(MT)</th><th>Sales Achv%</th><th>Coll Fcst(BDT)</th><th>Actual Coll(BDT)</th><th>Coll Achv%</th></tr></thead><tbody>${rows}</tbody><tfoot><tr style="font-weight:700;background:#f8fafc;"><td>TOTAL</td><td>${tMT.toFixed(1)}</td><td>${tSF.toFixed(1)}</td><td>${tS.toFixed(1)}</td><td><span class="badge ${tAS>=100?'badge-success':tAS>=50?'badge-warning':'badge-danger'}">${tAS.toFixed(1)}%</span></td><td>${formatBDTShort(tCF)}</td><td>${formatBDTShort(tC)}</td><td><span class="badge ${tAC>=100?'badge-success':tAC>=50?'badge-warning':'badge-danger'}">${tAC.toFixed(1)}%</span></td></tr></tfoot></table></div>`;
+  }
+}
+
+function refreshSharePreview() {
+  const pv = document.getElementById('sharePreviewContent');
+  if (!pv) return;
+  const zd     = getZoneAggregatedData();
+  const dayNum = appState.currentDay || new Date().getDate();
+  let rows='', tMT=0, tSF=0, tS=0, tTT=0, tTC=0, tCF=0, tC=0;
+  Object.keys(zd).forEach(zName => {
+    const d  = zd[zName];
+    const aS = d.totalSalesForecast>0?(d.totalSales/d.totalSalesForecast)*100:0;
+    const tt = (d.monthlyTarget/30)*dayNum, tc = d.totalSales;
+    const aT = tt>0?(tc/tt)*100:0;
+    const aC = d.totalCollectionForecast>0?(d.totalCollection/d.totalCollectionForecast)*100:0;
+    tMT+=d.monthlyTarget; tSF+=d.totalSalesForecast; tS+=d.totalSales; tTT+=tt; tTC+=tc; tCF+=d.totalCollectionForecast; tC+=d.totalCollection;
+    rows += `<tr><td>${escHtml(zName)}</td><td>${d.monthlyTarget.toFixed(1)}</td><td>${d.totalSalesForecast.toFixed(1)}</td><td>${d.totalSales.toFixed(1)}</td><td>${aS.toFixed(1)}%</td><td>${tt.toFixed(1)}</td><td>${tc.toFixed(1)}</td><td>${aT.toFixed(1)}%</td><td>${formatBDTShort(d.totalCollectionForecast)}</td><td>${formatBDTShort(d.totalCollection)}</td><td>${aC.toFixed(1)}%</td></tr>`;
+  });
+  const tAS=tSF>0?(tS/tSF)*100:0, tAT=tTT>0?(tTC/tTT)*100:0, tAC=tCF>0?(tC/tCF)*100:0;
+  pv.innerHTML = `<div style="padding:8px;font-size:.55rem;">
+    <h3 style="font-weight:700;margin-bottom:2px;">Astha Feed Industries Ltd.</h3>
+    <p style="color:#64748b;margin-bottom:6px;">Uttara, Dhaka-1230 | Date: ${new Date().toLocaleDateString()} | Day: ${appState.currentDay}</p>
+    <div class="table-responsive"><table style="font-size:.5rem;">
+      <thead><tr style="background:#f1f5f9;"><th>Zone</th><th>Tgt</th><th>Fcst</th><th>Sales</th><th>A%</th><th>TillT</th><th>CumS</th><th>A%</th><th>CollF</th><th>Coll</th><th>A%</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr style="font-weight:700;background:#f8fafc;"><td>Total</td><td>${tMT.toFixed(1)}</td><td>${tSF.toFixed(1)}</td><td>${tS.toFixed(1)}</td><td>${tAS.toFixed(1)}%</td><td>${tTT.toFixed(1)}</td><td>${tTC.toFixed(1)}</td><td>${tAT.toFixed(1)}%</td><td>${formatBDTShort(tCF)}</td><td>${formatBDTShort(tC)}</td><td>${tAC.toFixed(1)}%</td></tr></tfoot>
+    </table></div>
+  </div>`;
+}
+
+// ============================================================
+// SYNC STATUS
+// ============================================================
+function setSyncStatus(state, msg) {
+  const bar  = document.getElementById('syncStatusBar');
+  const txt  = document.getElementById('syncStatusText');
+  const time = document.getElementById('syncStatusTime');
+  if (!bar || !txt) return;
+  bar.className = 'sync-bar ' + state;
+  txt.textContent = msg;
+  if (time) time.textContent = new Date().toLocaleTimeString();
+  const icon = bar.querySelector('i');
+  if (icon) icon.className = state === 'syncing' ? 'fas fa-sync-alt spinning' : 'fas fa-circle';
+}
+
+// ============================================================
+// CLOUD FETCH
+// ============================================================
+async function fetchFromGoogleSheets() {
+  const apiUrl  = appState.gsSettings.apiKey;
+  const sheetId = appState.gsSettings.sheetId;
+  if (!apiUrl || !sheetId) { showToast('Configure Settings first.', 'warning'); return; }
+
+  const ri  = document.getElementById('dashRefreshIcon');
+  const mri = document.getElementById('mobileRefreshIcon');
+  if (ri)  ri.className  = 'fas fa-sync-alt spinning';
+  if (mri) mri.className = 'fas fa-sync-alt spinning';
+  setSyncStatus('syncing', 'Fetching from Cloud...');
+
+  const url = apiUrl + '?action=getData&sheetId=' + encodeURIComponent(sheetId);
+  try {
+    const resp = await fetch(url, {method:'GET'});
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Unknown error');
+
+    // Merge zones
+    if (data.zones && data.zones.length > 0) {
+      data.zones.forEach(cz => {
+        const lz = appState.zones.find(z => z.name === cz.name);
+        if (lz) { if (cz.monthlyTarget > 0) lz.monthlyTarget = cz.monthlyTarget; }
+        else appState.zones.push(cz);
+      });
+    }
+    // Merge users (cloud wins)
+    if (data.users && data.users.length > 0) {
+      data.users.forEach(cu => {
+        if (!cu.userId) return;
+        const idx = appState.users.findIndex(u => u.userId === cu.userId);
+        if (idx >= 0) appState.users[idx] = cu; else appState.users.push(cu);
+      });
+    }
+    // Replace daily entries with cloud data
+    if (data.dailyEntries && data.dailyEntries.length > 0) {
+      appState.dailyEntries = data.dailyEntries.filter(e => e.zone && e.date);
+    }
+    // Merge weekly
+    if (data.weeklyForecasts && data.weeklyForecasts.length > 0) {
+      data.weeklyForecasts.forEach(cw => {
+        if (!cw.zone) return;
+        const idx = appState.weeklyForecasts.findIndex(w => w.zone === cw.zone && w.dateRange === cw.dateRange);
+        if (idx >= 0) appState.weeklyForecasts[idx] = cw; else appState.weeklyForecasts.push(cw);
+      });
+    }
+
+    saveState();
+    refreshAllData();
+    setSyncStatus('synced', 'Fetched from Cloud  – ' + new Date().toLocaleTimeString());
+    showToast('Data fetched from Cloud!', 'success');
+  } catch(e) {
+    setSyncStatus('error', 'Cloud fetch failed: ' + e.message);
+    showToast('Cloud fetch failed: ' + e.message, 'warning');
+    console.warn('fetchFromGoogleSheets error:', e);
+  } finally {
+    if (ri)  ri.className  = 'fas fa-cloud-download-alt';
+    if (mri) mri.className = 'fas fa-sync';
+  }
+}
+
+// ============================================================
+// CLOUD PUSH
+// ============================================================
+function syncToGoogleSheets() {
+  const sheetId = appState.gsSettings.sheetId;
+  const apiKey  = appState.gsSettings.apiKey;
+  if (!sheetId || !apiKey) return Promise.reject(new Error('No Sheets config'));
+
+  const dailyData  = [['Date','Zone','MonthlyTarget','SalesForecast','Sales','CollectionForecast','Collection','Remarks','UserId','Timestamp']];
+  appState.dailyEntries.forEach(e => dailyData.push([e.date,e.zone,e.monthlyTarget,e.salesForecast,e.sales,e.collectionForecast,e.collection,e.remarks||'',e.userId,e.timestamp]));
+
+  const zonesData  = [['Zone','Code','MonthlyTarget']];
+  appState.zones.forEach(z => zonesData.push([z.name,z.code,z.monthlyTarget]));
+
+  const usersData  = [['UserID','Password','Zone','Role','Status']];
+  appState.users.forEach(u => usersData.push([u.userId,u.password,u.zone,u.role,u.status]));
+
+  const weeklyData = [['Zone','DateRange','SalesForecast','CollectionForecast']];
+  appState.weeklyForecasts.forEach(w => weeklyData.push([w.zone,w.dateRange,w.salesForecast,w.collectionForecast]));
+
+  const payload = {
+    action:'syncAll', sheetId,
+    dailySheet:  appState.gsSettings.sheetName   || 'DailyEntries',  dailyData,
+    weeklySheet: appState.gsSettings.weeklySheet || 'WeeklyForecast', weeklyData,
+    zonesSheet:  appState.gsSettings.zonesSheet  || 'Zones',          zonesData,
+    usersSheet:  appState.gsSettings.usersSheet  || 'Users',          usersData,
+  };
+
+  return fetch(apiKey, {method:'POST', headers:{'Content-Type':'text/plain'}, body:JSON.stringify(payload)})
+    .then(resp => {
+      if (resp.ok) return resp.json().then(r => { if (r.status==='success') return r; throw new Error(r.message||'Sync error'); });
+      throw new Error('HTTP ' + resp.status);
+    })
+    .catch(err =>
+      fetch(apiKey, {method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain'}, body:JSON.stringify(payload)})
+        .then(() => ({status:'success', message:'no-cors mode'}))
+        .catch(e => { throw new Error('Sync failed: ' + e.message); })
+    );
+}
+
+// ============================================================
+// AUTO-FETCH
+// ============================================================
+function startAutoFetch() {
+  stopAutoFetch();
+  if (appState.autoFetch)
+    autoFetchInterval = setInterval(() => { if (document.visibilityState === 'visible') fetchFromGoogleSheets(); }, 60000);
+}
+function stopAutoFetch() { clearInterval(autoFetchInterval); }
+function toggleAutoFetch(val) { appState.autoFetch = val; saveState(); if (val) startAutoFetch(); else stopAutoFetch(); showToast(val ? ' Auto-Fetch ON (60s)' : ' Auto-Fetch OFF', 'info'); }
+function toggleAutoSync(val)  { appState.autoSync  = val; saveState(); showToast(val ? ' Auto-Sync ON' : ' Auto-Sync OFF', 'info'); }
+
+function testGSConnection() {
+  const apiKey = appState.gsSettings.apiKey;
+  const st     = document.getElementById('gsStatus');
+  if (!apiKey) { if (st) { st.textContent = ' URL missing.'; st.style.color = '#dc2626'; } return; }
+  if (st) { st.textContent = ' Testing...'; st.style.color = '#d97706'; }
+  fetch(apiKey, {method:'POST', headers:{'Content-Type':'text/plain'}, body:JSON.stringify({action:'test'})})
+    .then(r => { if (r.ok) { if (st) { st.textContent = ' Connected!'; st.style.color = '#059669'; } } else throw new Error('HTTP ' + r.status); })
+    .catch(e => { if (st) { st.textContent = ' ' + e.message; st.style.color = '#d97706'; } });
+}
+
+function loadGSSettingsToForm() {
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  set('gsSheetId',    appState.gsSettings.sheetId     || '');
+  set('gsApiKey',     appState.gsSettings.apiKey      || '');
+  set('gsSheetName',  appState.gsSettings.sheetName   || 'DailyEntries');
+  set('gsWeeklySheet',appState.gsSettings.weeklySheet || 'WeeklyForecast');
+  set('gsZonesSheet', appState.gsSettings.zonesSheet  || 'Zones');
+  set('gsUsersSheet', appState.gsSettings.usersSheet  || 'Users');
+  const at = document.getElementById('autoSyncToggle');  if (at) at.checked = appState.autoSync;
+  const af = document.getElementById('autoFetchToggle'); if (af) af.checked = appState.autoFetch;
+}
+
+function saveGSSettings() {
+  const get = id => document.getElementById(id)?.value || '';
+  appState.gsSettings.sheetId      = get('gsSheetId');
+  appState.gsSettings.apiKey       = get('gsApiKey');
+  appState.gsSettings.sheetName    = get('gsSheetName')   || 'DailyEntries';
+  appState.gsSettings.weeklySheet  = get('gsWeeklySheet') || 'WeeklyForecast';
+  appState.gsSettings.zonesSheet   = get('gsZonesSheet')  || 'Zones';
+  appState.gsSettings.usersSheet   = get('gsUsersSheet')  || 'Users';
+  saveState();
+  showToast('Settings saved!', 'success');
+}
+
+// ============================================================
+// REFRESH ALL
+// ============================================================
+function refreshAllData() {
+  refreshDashboard();
+  refreshRecentEntries();
+  populateWeeklyTable();
+  refreshZoneTable();
+  refreshUserTable();
+  populateHeaderRenameFields();
+  populateNewUserZoneDropdown();
+  loadGSSettingsToForm();
+  populateEntryZoneDropdown();
+  populateDwZoneDropdown();
+  populateRecentFilterZone();
+  const ci = document.getElementById('currentDayInput');  if (ci) ci.value = appState.currentDay;
+  const cd = document.getElementById('currentDayDisplay'); if (cd) cd.textContent = appState.currentDay;
+  // FIX: also refresh daywise if it's currently visible
+  const dw = document.getElementById('panel-daywise');
+  if (dw && dw.style.display !== 'none') refreshDaywise();
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+function formatBDTShort(amount) {
+  if (!amount || isNaN(amount)) return '0';
+  const cr = amount / 10000000;
+  if (cr >= 1)       return cr.toFixed(2) + ' Cr';
+  if (amount >= 100000) return (amount / 100000).toFixed(2) + ' Lac';
+  return Number(amount).toFixed(0);
+}
+
+function escHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showToast(message, type = 'info') {
+  const c = document.getElementById('toastContainer');
+  if (!c) return;
+  const colors = {success:'#059669', danger:'#dc2626', warning:'#d97706', info:'#1a56db'};
+  const icons  = {success:'fa-check-circle', danger:'fa-times-circle', warning:'fa-exclamation-triangle', info:'fa-info-circle'};
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.style.background = colors[type] || colors.info;
+  t.innerHTML = `<i class="fas ${icons[type]||icons.info}"></i> ${escHtml(message)}`;
+  c.appendChild(t);
+  setTimeout(() => {
+    t.style.opacity = '0';
+    t.style.transform = 'translateX(120%)';
+    t.style.transition = 'all .4s ease';
+    setTimeout(() => t.remove(), 400);
+  }, 2800);
+}
+
+// ============================================================
+// EXPORT / SHARE
+// ============================================================
+async function generateCompactPDF(element, filename) {
+  try {
+    showToast('Generating PDF...', 'info');
+    const canvas   = await html2canvas(element, {scale:1.5, useCORS:true, logging:false});
+    const imgData  = canvas.toDataURL('image/jpeg', .7);
+    const {jsPDF}  = window.jspdf;
+    const pdf      = new jsPDF('p','mm','a4');
+    const imgWidth = 190;
+    const imgHeight= (canvas.height * imgWidth) / canvas.width;
+    let y = 10;
+    if (imgHeight <= 277) {
+      pdf.addImage(imgData,'JPEG',10,y,imgWidth,imgHeight,undefined,'FAST');
+    } else {
+      // Multi-page
+      let remaining = imgHeight;
+      let srcY = 0;
+      while (remaining > 0) {
+        const pageH = Math.min(277, remaining);
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width  = canvas.width;
+        sliceCanvas.height = (pageH / imgHeight) * canvas.height;
+        const sliceCtx = sliceCanvas.getContext('2d');
+        sliceCtx.drawImage(canvas, 0, srcY * canvas.height / imgHeight, canvas.width, sliceCanvas.height, 0, 0, canvas.width, sliceCanvas.height);
+        pdf.addImage(sliceCanvas.toDataURL('image/jpeg',.7),'JPEG',10,10,imgWidth,pageH,undefined,'FAST');
+        remaining -= pageH;
+        srcY += pageH;
+        if (remaining > 0) pdf.addPage();
+      }
+    }
+    pdf.save(filename);
+    return true;
+  } catch(e) { console.error(e); return false; }
+}
+
+async function exportDashboardPDF() { const ok = await generateCompactPDF(document.getElementById('dashboardExportArea'),'Dashboard_Astha.pdf'); showToast(ok?' PDF exported!':' Failed.',ok?'success':'danger'); }
+async function exportReportsPDF()   { const ok = await generateCompactPDF(document.getElementById('reportsExportArea'),'Reports_Astha.pdf');   showToast(ok?' PDF exported!':' Failed.',ok?'success':'danger'); }
+async function exportPDF()          { const ok = await generateCompactPDF(document.getElementById('sharePreviewContent')||document.getElementById('summaryTableCard'),'Astha_Report.pdf'); showToast(ok?' PDF exported!':' Failed.',ok?'success':'danger'); }
+async function exportDaywisePDF()   { const ok = await generateCompactPDF(document.getElementById('daywiseExportArea'),'Daywise_Astha.pdf');   showToast(ok?' PDF exported!':' Failed.',ok?'success':'danger'); }
+
+async function exportJPEGGeneric(id, fn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  showToast('Generating JPEG...', 'info');
+  const c = await html2canvas(el, {scale:2, useCORS:true});
+  const l = document.createElement('a');
+  l.download = fn;
+  l.href = c.toDataURL('image/jpeg', .88);
+  l.click();
+  showToast('JPEG exported!', 'success');
+}
+async function exportDashboardJPEG() { await exportJPEGGeneric('dashboardExportArea','Dashboard_Astha.jpeg'); }
+async function exportReportsJPEG()   { await exportJPEGGeneric('reportsExportArea','Reports_Astha.jpeg'); }
+async function exportJPEG()          { await exportJPEGGeneric('sharePreviewContent','Astha_Report.jpeg'); }
+
+function exportText() {
+  const zd = getZoneAggregatedData();
+  let text = 'Astha Feed Industries Ltd.\nDaily Report | ' + new Date().toLocaleDateString() + '\n' + '='.repeat(52) + '\n';
+  let tT=0, tS=0, tC=0;
+  Object.entries(zd).forEach(([z,d]) => {
+    const a = d.totalSalesForecast>0?(d.totalSales/d.totalSalesForecast)*100:0;
+    text += `${z.padEnd(14)} Tgt:${d.monthlyTarget.toFixed(1).padStart(7)} Sales:${d.totalSales.toFixed(1).padStart(7)} Achv:${a.toFixed(1).padStart(6)}% Coll:${formatBDTShort(d.totalCollection).padStart(12)}\n`;
+    tT+=d.monthlyTarget; tS+=d.totalSales; tC+=d.totalCollection;
+  });
+  text += '='.repeat(52) + '\nTotal Target: ' + tT.toFixed(1) + ' MT | Total Sales: ' + tS.toFixed(1) + ' MT | Total Coll: ' + formatBDTShort(tC) + '\n';
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
+  const l = document.createElement('a'); l.download='Astha_Report.txt'; l.href=URL.createObjectURL(blob); l.click(); URL.revokeObjectURL(l.href);
+  showToast('Text exported!', 'success');
+}
+
+function exportCSV() {
+  const zd = getZoneAggregatedData();
+  let csv = 'Zone,Monthly Target(MT),Sales Forecast(MT),Actual Sales(MT),Sales Achv%,Coll Forecast(BDT),Actual Collection(BDT),Coll Achv%\n';
+  Object.entries(zd).forEach(([z,d]) => {
+    const aS = d.totalSalesForecast>0?(d.totalSales/d.totalSalesForecast)*100:0;
+    const aC = d.totalCollectionForecast>0?(d.totalCollection/d.totalCollectionForecast)*100:0;
+    csv += `"${z}",${d.monthlyTarget},${d.totalSalesForecast},${d.totalSales},${aS.toFixed(1)}%,${d.totalCollectionForecast},${d.totalCollection},${aC.toFixed(1)}%\n`;
+  });
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const l = document.createElement('a'); l.download='Astha_Report.csv'; l.href=URL.createObjectURL(blob); l.click(); URL.revokeObjectURL(l.href);
+  showToast('CSV exported!', 'success');
+}
+
+function exportDaywiseCSV() {
+  const fromVal = document.getElementById('dwFrom')?.value;
+  const toVal   = document.getElementById('dwTo')?.value;
+  const zone    = document.getElementById('dwZone')?.value || 'All';
+  if (!fromVal || !toVal) { showToast('Apply filter first.', 'warning'); return; }
+  const from = new Date(fromVal), to = new Date(toVal);
+  let entries = appState.dailyEntries.filter(e => { const d=new Date(e.date); return d>=from&&d<=to; });
+  if (zone !== 'All') entries = entries.filter(e => e.zone === zone);
+  entries = entries.sort((a,b) => a.date.localeCompare(b.date));
+  let csv = 'Date,Zone,Monthly Target(MT),Daily Target(MT),Sales Fcst(MT),Actual Sales(MT),vs Fcst%,vs DayTarget%,Coll Fcst(BDT),Actual Coll(BDT),Coll Achv%\n';
+  entries.forEach(e => {
+    const dt  = (e.monthlyTarget||0)/30;
+    const vsF = e.salesForecast>0?(e.sales/e.salesForecast)*100:0;
+    const vsDT= dt>0?(e.sales/dt)*100:0;
+    const cA  = e.collectionForecast>0?(e.collection/e.collectionForecast)*100:0;
+    csv += `"${e.date}","${e.zone}",${e.monthlyTarget},${dt.toFixed(2)},${e.salesForecast},${e.sales},${vsF.toFixed(1)}%,${vsDT.toFixed(1)}%,${e.collectionForecast},${e.collection},${cA.toFixed(1)}%\n`;
+  });
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const l = document.createElement('a'); l.download='Daywise_Astha.csv'; l.href=URL.createObjectURL(blob); l.click(); URL.revokeObjectURL(l.href);
+  showToast('CSV exported!', 'success');
+}
+
+function shareWhatsAppGeneric(prefix) {
+  const text = encodeURIComponent(
+    prefix + 'Astha Feed Industries\nDate: ' + new Date().toLocaleDateString() +
+    '\nSales: '  + (document.getElementById('kpiTotalSales')?.textContent  || 'N/A') +
+    '\nAchv: '   + (document.getElementById('kpiAchievement')?.textContent || 'N/A') +
+    '\nColl: '   + (document.getElementById('kpiCollection')?.textContent  || 'N/A')
+  );
+  window.open('https://wa.me/?text=' + text, '_blank');
+}
+function shareDashboardWhatsApp() { shareWhatsAppGeneric(' Dashboard – '); }
+function shareReportsWhatsApp()   { shareWhatsAppGeneric(' Reports – ');   }
+function shareWhatsApp()          { shareWhatsAppGeneric(' ');              }
+function shareDaywiseWhatsApp() {
+  const from = document.getElementById('dwFrom')?.value || '';
+  const to   = document.getElementById('dwTo')?.value   || '';
+  const zone = document.getElementById('dwZone')?.value || 'All';
+  const text = encodeURIComponent(
+    ` Day-wise Report – Astha Feed\nPeriod: ${from} to ${to}\nZone: ${zone}\n` +
+    `Sales: ${document.getElementById('dwKpiSales')?.textContent||'—'} MT\n` +
+    `Achievement: ${document.getElementById('dwKpiAchv')?.textContent||'—'}\n` +
+    `Collection: ${document.getElementById('dwKpiColl')?.textContent||'—'}`
+  );
+  window.open('https://wa.me/?text=' + text, '_blank');
+}
+
+function shareEmailGeneric(subject) {
+  const body = encodeURIComponent(
+    'Astha Feed Industries\nDate: ' + new Date().toLocaleDateString() +
+    '\nSales: '  + (document.getElementById('kpiTotalSales')?.textContent  || 'N/A') +
+    '\nAchievement: ' + (document.getElementById('kpiAchievement')?.textContent || 'N/A') +
+    '\nCollection: '  + (document.getElementById('kpiCollection')?.textContent  || 'N/A')
+  );
+  window.location.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + body;
+}
+function shareDashboardEmail() { shareEmailGeneric('Astha Feed – Dashboard'); }
+function shareReportsEmail()   { shareEmailGeneric('Astha Feed – Reports');   }
+function shareEmail()          { shareEmailGeneric('Astha Feed – Forecast Report'); }
+
+function printElement(el, title) {
+  const pw = window.open('', '_blank', 'width=1100,height=800');
+  if (!pw) { showToast('Allow pop-ups to print.', 'warning'); return; }
+  pw.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
+    <style>
+      body{font-family:'Segoe UI',sans-serif;padding:14px;color:#1e293b;font-size:10px;}
+      table{width:100%;border-collapse:collapse;}
+      th,td{padding:4px 6px;border:1px solid #e2e8f0;}
+      th{background:#f1f5f9;font-weight:700;}
+      .badge{padding:2px 6px;border-radius:10px;font-size:.6rem;font-weight:700;}
+      .badge-success{background:#d1fae5;color:#065f46;}
+      .badge-warning{background:#fef3c7;color:#92400e;}
+      .badge-danger{background:#fee2e2;color:#991b1b;}
+      .badge-info{background:#dbeafe;color:#1e40af;}
+      h2,h3,h4{margin:0 0 6px;}
+      @media print{body{padding:0;}}
+    </style>
+  </head><body>${el.innerHTML}</body></html>`);
+  pw.document.close();
+  pw.focus();
+  setTimeout(() => { pw.print(); pw.close(); }, 600);
+  showToast('Printing...', 'info');
+}
+function printDashboard()  { const el=document.getElementById('dashboardExportArea'); if(el) printElement(el,'Dashboard'); }
+function printReports()    { const el=document.getElementById('reportsExportArea');   if(el) printElement(el,'Reports'); }
+function printStatement()  { const el=document.getElementById('summaryTableCard');    if(el) printElement(el,'Statement'); }
+function printReport()     { const el=document.getElementById('sharePreviewContent'); if(el) printElement(el,'Report'); }
+function printDaywise()    { const el=document.getElementById('daywiseExportArea');   if(el) printElement(el,'Day-wise Report'); }
+
+// ============================================================
+// KEYBOARD SHORTCUTS
+// ============================================================
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 's') { e.preventDefault(); saveState(); showToast('Saved!', 'info'); }
+  if (e.ctrlKey && e.key === '1') { e.preventDefault(); navigateTo('dashboard'); }
+  if (e.ctrlKey && e.key === '2') { e.preventDefault(); navigateTo('dailyEntry'); }
+  if (e.ctrlKey && e.key === '3') { e.preventDefault(); navigateTo('daywise'); }
+  if (e.ctrlKey && e.key === '4') { e.preventDefault(); navigateTo('reports'); }
+  // FIX: Enter key on login — check loginOverlay display correctly
+  if (e.key === 'Enter') {
+    const lo = document.getElementById('loginOverlay');
+    if (lo && lo.style.display === 'flex') { e.preventDefault(); doLogin(); }
+  }
+});
+
+// ============================================================
+// BOOT
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+  initApp();
+
+  // Set today's date in entry form
+  const dateInput = document.getElementById('entryDate');
+  if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+
+  // Weekly date range change listener
+  const wdr = document.getElementById('weeklyDateRange');
+  if (wdr) wdr.addEventListener('change', function() {
+    appState.weeklyDateRange = this.value;
+    saveState();
+    populateWeeklyTable();
+  });
+
+  // Responsive resize
+  window.addEventListener('resize', setupResponsive);
+
+  // Visibility change — re-fetch when tab becomes active
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && appState.currentUser && appState.autoFetch)
+      fetchFromGoogleSheets();
+  });
+});
+</script>
+</body>
+</html>
